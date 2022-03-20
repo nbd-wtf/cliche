@@ -5,8 +5,8 @@ import net.ceedubs.ficus.Ficus._
 import java.io.File
 
 class Config(datadir: File) {
-  val resourcesDir: File = new File(datadir, "/.immortan-cli/")
-  val assetsDir: File = new File(datadir, "/.immortan-cli/assets")
+  val resourcesDir: File = new File(datadir, ".")
+  val assetsDir: File = new File(datadir, "./assets")
 
   val config: TypesafeConfig = ConfigFactory parseFile new File(resourcesDir, "wallet.conf")
 

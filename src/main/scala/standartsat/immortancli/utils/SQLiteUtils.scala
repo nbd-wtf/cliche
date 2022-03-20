@@ -6,7 +6,7 @@ import java.sql.{Connection, DriverManager}
 
 
 object SQLiteUtils {
-  def getConnection: Connection = DriverManager.getConnection("jdbc:sqlite:mydb.db")
+  def getConnection: Connection = DriverManager.getConnection("jdbc:sqlite:db.sqlite")
 
   def interfaceWithTables(con: Connection, tables: Table*): DBInterface = {
     val interface = DBInterfaceSQLiteGeneral(con)

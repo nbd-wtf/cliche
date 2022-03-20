@@ -65,7 +65,7 @@ import immortan.ChannelHosted
 import immortan.fsm.HCOpenHandler
 
 object Hello extends App {
-  var userdir: File = new File(System.getProperty("user.home"))
+  var userdir: File = new File("./data")
   var config: Config = new Config(userdir)
 
   val connection = SQLiteUtils.getConnection
@@ -86,9 +86,7 @@ object Hello extends App {
   val secret = makeSecret()
   this.makeOperational(secret)
   println("LNParams.isOperational %b".format(LNParams.isOperational))
-  val systemOfImmortan = LNParams.system
-  //systemOfImmortan.logConfiguration()
-  systemOfImmortan.log.info("Test IMMORTAN LOG output")
+  LNParams.system.log.info("Test IMMORTAN LOG output")
 
   def isAlive: Boolean = null != txDataBag && null != lnUrlPayBag && null != chainWalletBag && null != extDataBag
 
@@ -141,11 +139,6 @@ object Hello extends App {
     secret
   }
 
-  def customElectrumAddress: Try[NodeAddress] = Try {
-    val rawAddress = "electrum.hsmiths.com:50002"
-    nodeaddress.decode(BitVector fromValidHex rawAddress).require.value
-  }
-
   var lastTotalResyncStamp: Long = 0L
   var lastNormalResyncStamp: Long = 0L
 
@@ -153,7 +146,6 @@ object Hello extends App {
     require(isAlive, "Application is not alive, hence can not become operational")
     val essentialInterface = new DBInterfaceSQLiteAndroidEssential(connection)
     val graphInterface = new DBInterfaceSQLiteAndroidGraph(connection)
-    val currentCustomElectrumAddress: Try[NodeAddress] = customElectrumAddress
     LNParams.secret = secret
 
     val normalBag = new SQLiteNetwork(dbinterface, NormalChannelUpdateTable, NormalChannelAnnouncementTable, NormalExcludedChannelTable)
@@ -183,7 +175,6 @@ object Hello extends App {
 
 
     ElectrumClientPool.loadFromChainHash = {
-      case _ if currentCustomElectrumAddress.isSuccess => ElectrumServerAddress(currentCustomElectrumAddress.get.socketAddress, SSL.LOOSE).asSome.toSet
       case Block.LivenetGenesisBlock.hash => ElectrumClientPool.readServerAddresses(new FileInputStream(new File(s"${config.assetsDir}/servers_mainnet.json")), sslEnabled = true)
       case Block.TestnetGenesisBlock.hash => ElectrumClientPool.readServerAddresses(new FileInputStream(new File(s"${config.assetsDir}/servers_testnet.json")), sslEnabled = true)
       case _ => throw new RuntimeException
@@ -293,8 +284,8 @@ object Hello extends App {
   val listeners: Set[ConnectionListener] = Set(someListener)
   //val sbw: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03b8534f2d84de39a68d1359f6833fde819b731e188ddf633a666f7bf8c1d7650a"), NodeAddress.unresolved(9735, host = 45, 61, 187, 156), "SBW")
   val eclair: RemoteNodeInfo = RemoteNodeInfo(
-    PublicKey(hex"02312a1db948a9edacbac5cbe7d5127cd83153ab7d6d2e77ee8c1bb9ece8412216"),
-    NodeAddress.unresolved(9735, host = 0, 0, 0, 0), "Eclair")
+    PublicKey(hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"),
+    NodeAddress.unresolved(9734, host = 107, 189, 30, 195), "@lntxbot")
 
   val ourLocalNodeId = Tools.randomKeyPair // пир будет видеть наш nodeId как этот рандомный ключ
 
@@ -312,13 +303,13 @@ object Hello extends App {
   val system = ActorSystem("HelloSystem")
   val uiActor = system.actorOf(Props[UIActor], name = "uiactor")
   val logActor = system.actorOf(Props[UILogger], name = "logactor")
-  //system.logConfiguration()
+
   while(true){
     val userInput = scala.io.StdIn.readLine()
     if (userInput.matches("exit")) {
       println("Shutting down...")
       system.terminate()
-      systemOfImmortan.terminate()
+      LNParams.system.terminate()
       System.exit(0)
     }
     println("User input "+ userInput)

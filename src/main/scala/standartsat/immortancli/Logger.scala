@@ -11,7 +11,7 @@ import akka.event.Logging.Warning
 import java.io._
 
 class UILogger extends Actor {
-  val logfile: File = new File("/home/ilya/debug.log")
+  val logfile: File = new File("./debug.log")
   val logbuffer: BufferedWriter = new BufferedWriter(new FileWriter(logfile))
 
   override def preStart() = {

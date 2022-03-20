@@ -22,7 +22,7 @@ class UIActor extends Actor {
   val localParams = LNParams.makeChannelParams(LNParams.chainWallets, isFunder = false, LNParams.minChanDustLimit)
 
   val eclair: RemoteNodeInfo = RemoteNodeInfo(
-    PublicKey(hex"02312a1db948a9edacbac5cbe7d5127cd83153ab7d6d2e77ee8c1bb9ece8412216"),
+    PublicKey(hex""),
     NodeAddress.unresolved(9735, host = 0, 0, 0, 0), "Eclair")
 
   def requestHostedChannel: Unit = {
@@ -40,12 +40,8 @@ class UIActor extends Actor {
         println(reason)
       }
 
-      def onEstablished(cs: Commitments, channel: ChannelHosted) = {
+      def onEstablished(cs: Commitments, freshChannel: ChannelHosted) = {
         println("HC established")
-        implant(cs, channel)
-      }
-
-      def implant(cs: Commitments, freshChannel: ChannelHosted): Unit = {
         //WalletApp.app.prefs.edit.putBoolean(WalletApp.OPEN_HC, false).commit
         //WalletApp.backupSaveWorker.replaceWork(false)
         LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
