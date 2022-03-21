@@ -19,7 +19,7 @@ class UILogger extends Actor {
   }
 
   override def receive: Receive = {
-    case InitializeLogger(_)                        => sender() ! LoggerInitialized
+    case InitializeLogger(_) => sender() ! LoggerInitialized
     case Error(cause, logSource, logClass, message) => println(message)
     case Warning(logSource, logClass, message)      => println(message)
     case Info(logSource, logClass, message)         => println("info")

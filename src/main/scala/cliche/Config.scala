@@ -8,8 +8,10 @@ class Config(datadir: File) {
   val resourcesDir: File = new File(datadir, ".")
   val assetsDir: File = new File(datadir, "./assets")
 
-  val config: TypesafeConfig = ConfigFactory parseFile new File(resourcesDir, "wallet.conf")
+  val config: TypesafeConfig =
+    ConfigFactory parseFile new File(resourcesDir, "wallet.conf")
 
   val network: String = config.as[String]("config.network")
-  val mnemonics: List[String] = config.as[String]("config.seed").split(" ").toList
+  val mnemonics: List[String] =
+    config.as[String]("config.seed").split(" ").toList
 }
