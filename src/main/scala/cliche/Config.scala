@@ -1,4 +1,4 @@
-package standartsat.immortancli
+package cliche
 
 import com.typesafe.config.{ConfigFactory, Config => TypesafeConfig}
 import net.ceedubs.ficus.Ficus._

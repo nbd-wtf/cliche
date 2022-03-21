@@ -4,5 +4,7 @@ target
 out/
 IMMORTAN
 project/
-data/
+data/db.sqlite
+data/wallet.conf
 debug.log
+.metals/

@@ -1,4 +1,4 @@
-package standartsat.immortancli.utils
+package cliche.utils
 
 import immortan.sqlite._
 
@@ -6,7 +6,7 @@ import java.sql.{Connection, DriverManager}
 
 
 object SQLiteUtils {
-  def getConnection: Connection = DriverManager.getConnection("jdbc:sqlite:db.sqlite")
+  def getConnection: Connection = DriverManager.getConnection("jdbc:sqlite:data/db.sqlite")
 
   def interfaceWithTables(con: Connection, tables: Table*): DBInterface = {
     val interface = DBInterfaceSQLiteGeneral(con)

@@ -1,4 +1,4 @@
-package standartsat.immortancli
+package cliche
 
 import java.io.{File, FileInputStream}
 import java.net.InetSocketAddress
@@ -11,7 +11,7 @@ import fr.acinq.bitcoin.ByteVector32.fromValidHex
 import immortan.{ChanFundingTxDescription, Channel, ChannelMaster, CommsTower, ConnectionListener, KeyPairAndPubKey, LNParams, LightningNodeKeys, PathFinder, RemoteNodeInfo, SyncParams, TxDescription, WalletExt, WalletSecret}
 import immortan.crypto.Tools.{Any2Some, none, runAnd}
 import immortan.sqlite.{DBInterfaceSQLiteGeneral, HostedChannelAnnouncementTable, HostedChannelUpdateTable, HostedExcludedChannelTable, NormalChannelAnnouncementTable, NormalChannelUpdateTable, NormalExcludedChannelTable, SQLiteChainWallet, SQLiteChannel, SQLiteLNUrlPay, SQLiteLog, SQLiteNetwork, SQLitePayment, SQLiteTx}
-import standartsat.immortancli.utils.SQLiteUtils
+import cliche.utils.SQLiteUtils
 import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi, SatoshiLong}
 import fr.acinq.eclair.MilliSatoshi
 import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
@@ -64,7 +64,7 @@ import scala.util.Try
 import immortan.ChannelHosted
 import immortan.fsm.HCOpenHandler
 
-object Hello extends App {
+object Main extends App {
   var userdir: File = new File("./data")
   var config: Config = new Config(userdir)
 

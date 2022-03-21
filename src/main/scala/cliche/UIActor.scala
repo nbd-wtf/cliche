@@ -1,4 +1,4 @@
-package standartsat.immortancli
+package cliche
 
 import akka.actor.Actor
 import com.softwaremill.quicklens.ModifyPimp
@@ -22,8 +22,8 @@ class UIActor extends Actor {
   val localParams = LNParams.makeChannelParams(LNParams.chainWallets, isFunder = false, LNParams.minChanDustLimit)
 
   val eclair: RemoteNodeInfo = RemoteNodeInfo(
-    PublicKey(hex""),
-    NodeAddress.unresolved(9735, host = 0, 0, 0, 0), "Eclair")
+    PublicKey(hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"),
+    NodeAddress.unresolved(9734, host = 107, 189, 30, 195), "@lntxbot")
 
   def requestHostedChannel: Unit = {
     val localParams = LNParams.makeChannelParams(LNParams.chainWallets, isFunder = false, LNParams.minChanDustLimit)

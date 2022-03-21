@@ -1,4 +1,4 @@
-package standartsat.immortancli
+package cliche
 
 import akka.actor.Actor
 import akka.event.Logging.Debug
