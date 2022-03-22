@@ -1,6 +1,7 @@
 package cliche
 
 import org.json4s._
+import org.json4s.native.JsonMethods.{parse}
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, randomBytes32}
@@ -20,64 +21,93 @@ import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.ByteVector32
 import immortan.utils.ImplicitJsonFormats.to
 import immortan.utils.PaymentRequestExt
-import scodec.bits.HexStringSyntax
+import scodec.bits.ByteVector
 
 import scala.util.Try
 import util.control.Breaks._
 
-case class Command(method: String, params: Option[Map[String, JValue]])
+trait Command
+
+case class NoCommand() extends Command
+case class RequestHostedChannel(pubkey: String, host: String, port: Int)
+    extends Command
+case class Exit() extends Command
 
 object Commands {
-  val localParams = LNParams.makeChannelParams(
-    LNParams.chainWallets,
-    isFunder = false,
-    LNParams.minChanDustLimit
-  )
+  implicit val formats: Formats = DefaultFormats
 
-  val eclair: RemoteNodeInfo = RemoteNodeInfo(
-    PublicKey(
-      hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
-    ),
-    NodeAddress.unresolved(9734, host = 107, 189, 30, 195),
-    "@lntxbot"
-  )
+  def decode(input: String): Command = {
+    try {
+      val parsed: JValue = parse(input)
 
-  def requestHostedChannel(command: Command): Unit = {
+      (parsed \ "method").extract[String] match {
+        case "request-hosted-channel" => parsed.extract[RequestHostedChannel]
+        case "exit"                   => parsed.extract[Exit]
+        case _                        => NoCommand()
+      }
+    } catch {
+      case _ => NoCommand()
+    }
+  }
+
+  def handle(command: Command): Unit = command match {
+    case Exit() => {
+      println("Shutting down...")
+      LNParams.system.terminate()
+      System.exit(0)
+    }
+    case params: RequestHostedChannel => Commands.requestHostedChannel(params)
+    case _                            => {}
+  }
+
+  def requestHostedChannel(params: RequestHostedChannel): Unit = {
     val localParams = LNParams.makeChannelParams(
       LNParams.chainWallets,
       isFunder = false,
       LNParams.minChanDustLimit
     )
-    new HCOpenHandler(
-      eclair,
-      randomBytes32,
-      localParams.defaultFinalScriptPubKey,
-      LNParams.cm
-    ) {
-      println("Creating new HC handler")
 
-      def onException: Unit = {
-        println("onMessage onException")
-      }
+    ByteVector.fromHex(params.pubkey) match {
+      case None => {}
+      case Some(pubkey) => {
+        val target: RemoteNodeInfo = RemoteNodeInfo(
+          PublicKey(pubkey),
+          NodeAddress.fromParts(host = params.host, port = params.port),
+          "unnamed"
+        )
 
-      // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
-      def onFailure(reason: Throwable) = {
-        println("Failed to open HC channel")
-        println(reason)
-      }
+        new HCOpenHandler(
+          target,
+          randomBytes32,
+          localParams.defaultFinalScriptPubKey,
+          LNParams.cm
+        ) {
+          println("Creating new HC handler")
 
-      def onEstablished(cs: Commitments, freshChannel: ChannelHosted) = {
-        println("HC established")
-        // WalletApp.app.prefs.edit.putBoolean(WalletApp.OPEN_HC, false).commit
-        // WalletApp.backupSaveWorker.replaceWork(false)
-        LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
-        LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
-        // This removes all previous channel listeners
-        freshChannel.listeners = Set(LNParams.cm)
-        LNParams.cm.initConnect
-        // Update view on hub activity and finalize local stuff
-        ChannelMaster.next(ChannelMaster.statusUpdateStream)
-        println("[DEBUG] HC implanted")
+          def onException: Unit = {
+            println("onMessage onException")
+          }
+
+          // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
+          def onFailure(reason: Throwable) = {
+            println("Failed to open HC channel")
+            println(reason)
+          }
+
+          def onEstablished(cs: Commitments, freshChannel: ChannelHosted) = {
+            println("HC established")
+            // WalletApp.app.prefs.edit.putBoolean(WalletApp.OPEN_HC, false).commit
+            // WalletApp.backupSaveWorker.replaceWork(false)
+            LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
+            LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
+            // This removes all previous channel listeners
+            freshChannel.listeners = Set(LNParams.cm)
+            LNParams.cm.initConnect
+            // Update view on hub activity and finalize local stuff
+            ChannelMaster.next(ChannelMaster.statusUpdateStream)
+            println("[DEBUG] HC implanted")
+          }
+        }
       }
     }
   }

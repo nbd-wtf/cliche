@@ -2,8 +2,6 @@ package cliche
 
 import java.io.{File, FileInputStream}
 import java.net.InetSocketAddress
-import org.json4s._
-import org.json4s.native.JsonMethods._
 import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
 import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
@@ -132,7 +130,7 @@ import immortan.fsm.HCOpenHandler
 
 // local
 import cliche.utils.SQLiteUtils
-import cliche.{Commands, Command}
+import cliche.{Commands}
 
 object Main extends App {
   var userdir: File = new File("./data")
@@ -549,23 +547,6 @@ object Main extends App {
   implicit val formats: Formats = DefaultFormats
 
   while (true) {
-    var command = Command("none", None)
-
-    try {
-      command = parse(scala.io.StdIn.readLine()).extract[Command]
-    } catch {
-      case e: org.json4s.ParserUtil$ParseException => {}
-      case _                                       => {}
-    }
-
-    command.method match {
-      case "exit" => {
-        println("Shutting down...")
-        LNParams.system.terminate()
-        System.exit(0)
-      }
-      case "requesthostedchannel" => Commands.requestHostedChannel(command)
-      case _                      => {}
-    }
+    Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
   }
 }
