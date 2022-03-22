@@ -510,9 +510,7 @@ object Main extends App {
     }
   }
 
-  val someListener = new NetworkListener
-  val listeners: Set[ConnectionListener] = Set(someListener)
-  val eclair: RemoteNodeInfo = RemoteNodeInfo(
+  val remotePeer: RemoteNodeInfo = RemoteNodeInfo(
     PublicKey(
       hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
     ),
@@ -524,27 +522,10 @@ object Main extends App {
     Tools.randomKeyPair
 
   CommsTower.listen(
-    listeners,
-    KeyPairAndPubKey(ourLocalNodeId, eclair.nodeId),
-    eclair
+    Set(new NetworkListener),
+    KeyPairAndPubKey(ourLocalNodeId, remotePeer.nodeId),
+    remotePeer
   )
-
-  CommsTower.listen(
-    Set(someListener),
-    KeyPairAndPubKey(ourLocalNodeId, eclair.nodeId),
-    eclair
-  )
-
-  val someListener1 = new NetworkListener
-  val ourLocalNodeId1 = Tools.randomKeyPair
-
-  CommsTower.listen(
-    Set(someListener, someListener1),
-    KeyPairAndPubKey(ourLocalNodeId1, eclair.nodeId),
-    eclair
-  )
-
-  implicit val formats: Formats = DefaultFormats
 
   while (true) {
     Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
