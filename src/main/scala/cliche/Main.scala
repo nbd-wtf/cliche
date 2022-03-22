@@ -2,6 +2,8 @@ package cliche
 
 import java.io.{File, FileInputStream}
 import java.net.InetSocketAddress
+import org.json4s._
+import org.json4s.native.JsonMethods._
 import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
 import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
@@ -46,7 +48,6 @@ import immortan.sqlite.{
   SQLitePayment,
   SQLiteTx
 }
-import cliche.utils.SQLiteUtils
 import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi, SatoshiLong}
 import fr.acinq.eclair.MilliSatoshi
 import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
@@ -90,8 +91,7 @@ import immortan.utils.{
 import scodec.bits.BitVector
 
 import java.util.concurrent.atomic.AtomicLong
-import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
-import akka.util.Timeout
+import akka.actor.{Props}
 import com.google.common.io.ByteStreams
 import com.softwaremill.quicklens._
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
@@ -129,6 +129,10 @@ import scala.util.Try
 // HC opening stuff
 import immortan.ChannelHosted
 import immortan.fsm.HCOpenHandler
+
+// local
+import cliche.utils.SQLiteUtils
+import cliche.{Commands, Command}
 
 object Main extends App {
   var userdir: File = new File("./data")
@@ -492,8 +496,6 @@ object Main extends App {
     LNParams.cm.notifyResolvers
   }
 
-  // Connecting to node
-
   class NetworkListener extends ConnectionListener {
     override def onOperational(
         worker: CommsTower.Worker,
@@ -512,7 +514,6 @@ object Main extends App {
 
   val someListener = new NetworkListener
   val listeners: Set[ConnectionListener] = Set(someListener)
-  // val sbw: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03b8534f2d84de39a68d1359f6833fde819b731e188ddf633a666f7bf8c1d7650a"), NodeAddress.unresolved(9735, host = 45, 61, 187, 156), "SBW")
   val eclair: RemoteNodeInfo = RemoteNodeInfo(
     PublicKey(
       hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
@@ -522,44 +523,49 @@ object Main extends App {
   )
 
   val ourLocalNodeId =
-    Tools.randomKeyPair // пир будет видеть наш nodeId как этот рандомный ключ
+    Tools.randomKeyPair
 
   CommsTower.listen(
     listeners,
     KeyPairAndPubKey(ourLocalNodeId, eclair.nodeId),
     eclair
-  ) // попытка подключения, потом onOperational
+  )
 
   CommsTower.listen(
     Set(someListener),
     KeyPairAndPubKey(ourLocalNodeId, eclair.nodeId),
     eclair
-  ) // мгновенный onOperational на someListener1 (потому что мы уже подключены (если подключены))
+  )
 
   val someListener1 = new NetworkListener
-  val ourLocalNodeId1 = Tools.randomKeyPair // еще один рандомный ключ
+  val ourLocalNodeId1 = Tools.randomKeyPair
 
-  // еще одно подключение к тому же удаленному узлу, но он видит нас как другой узел, то есть у нас 2 сокетных подключения
   CommsTower.listen(
     Set(someListener, someListener1),
     KeyPairAndPubKey(ourLocalNodeId1, eclair.nodeId),
     eclair
   )
 
-  // Not really working part 21 Nov. exit may be executed if typed fast enough
-  val system = ActorSystem("HelloSystem")
-  val uiActor = system.actorOf(Props[UIActor], name = "uiactor")
-  val logActor = system.actorOf(Props[UILogger], name = "logactor")
+  implicit val formats: Formats = DefaultFormats
 
   while (true) {
-    val userInput = scala.io.StdIn.readLine()
-    if (userInput.matches("exit")) {
-      println("Shutting down...")
-      system.terminate()
-      LNParams.system.terminate()
-      System.exit(0)
+    var command = Command("none", None)
+
+    try {
+      command = parse(scala.io.StdIn.readLine()).extract[Command]
+    } catch {
+      case e: org.json4s.ParserUtil$ParseException => {}
+      case _                                       => {}
     }
-    println("User input " + userInput)
-    uiActor ! userInput
+
+    command.method match {
+      case "exit" => {
+        println("Shutting down...")
+        LNParams.system.terminate()
+        System.exit(0)
+      }
+      case "requesthostedchannel" => Commands.requestHostedChannel(command)
+      case _                      => {}
+    }
   }
 }

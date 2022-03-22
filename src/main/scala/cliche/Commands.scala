@@ -1,6 +1,6 @@
 package cliche
 
-import akka.actor.Actor
+import org.json4s._
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, randomBytes32}
@@ -25,8 +25,9 @@ import scodec.bits.HexStringSyntax
 import scala.util.Try
 import util.control.Breaks._
 
-class UIActor extends Actor {
+case class Command(method: String, params: Option[Map[String, JValue]])
 
+object Commands {
   val localParams = LNParams.makeChannelParams(
     LNParams.chainWallets,
     isFunder = false,
@@ -41,7 +42,7 @@ class UIActor extends Actor {
     "@lntxbot"
   )
 
-  def requestHostedChannel: Unit = {
+  def requestHostedChannel(command: Command): Unit = {
     val localParams = LNParams.makeChannelParams(
       LNParams.chainWallets,
       isFunder = false,
@@ -170,14 +171,5 @@ class UIActor extends Actor {
 
     LNParams.cm.localSend(cmd)
     println("Sent")
-  }
-
-  def receive = {
-    case msg: String if msg.contains("help") =>
-      println("this is IMMORTAN demo app")
-    case msg: String if msg == "open"           => requestHostedChannel
-    case msg: String if msg.contains("receive") => receivePayment(msg)
-    case msg: String if msg.contains("send")    => sendPayment(msg)
-    case _                                      => println("unknown command")
   }
 }
