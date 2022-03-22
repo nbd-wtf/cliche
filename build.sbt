@@ -1,6 +1,9 @@
+ThisBuild / name             := "cliche"
+ThisBuild / organization     := "fiatjaf"
 ThisBuild / scalaVersion     := "2.11.12"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
-ThisBuild / organization     := "fiatjaf"
+
+assembly / mainClass := Some("cliche.Main")
 
 ThisBuild / libraryDependencies ++= Seq(
   compilerPlugin("com.github.ghik" % "silencer-plugin" % "1.7.7" cross CrossVersion.full),
