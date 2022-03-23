@@ -32,6 +32,7 @@ import util.control.Breaks._
 trait Command
 
 case class NoCommand() extends Command
+case class UnknownCommand() extends Command
 case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
     extends Command
@@ -61,7 +62,7 @@ object Commands {
         case "pay-invoice"            => params.extract[PayInvoice]
         case "check-invoice"          => params.extract[CheckInvoice]
         case "check-payment"          => params.extract[CheckPayment]
-        case _                        => NoCommand()
+        case _                        => UnknownCommand()
       }
     } catch {
       case _ => NoCommand()
