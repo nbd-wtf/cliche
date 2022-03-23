@@ -118,12 +118,6 @@ import immortan.utils._
 import immortan.wire.ExtCodecs
 import scodec.bits.{ByteVector, HexStringSyntax}
 
-import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContextExecutor}
-import scala.util.Try
-import scala.concurrent.duration.DurationInt
-import scala.util.Try
-
 // HC opening stuff
 import immortan.ChannelHosted
 import immortan.fsm.HCOpenHandler
@@ -136,9 +130,9 @@ object Main extends App {
   var userdir: File = new File("./data")
   var config: Config = new Config(userdir)
 
-  val connection = SQLiteUtils.getConnection
-  val dbinterface = DBInterfaceSQLiteGeneral(connection)
-  val miscInterface = new DBInterfaceSQLiteAndroidMisc(connection)
+  val sqlitedb = SQLiteUtils.getConnection
+  val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
+  val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
   var txDataBag: SQLiteTx = null
   var lnUrlPayBag: SQLiteLNUrlPay = null
   var chainWalletBag: SQLiteChainWallet = null
@@ -224,8 +218,8 @@ object Main extends App {
       isAlive,
       "Application is not alive, hence can not become operational"
     )
-    val essentialInterface = new DBInterfaceSQLiteAndroidEssential(connection)
-    val graphInterface = new DBInterfaceSQLiteAndroidGraph(connection)
+    val essentialInterface = new DBInterfaceSQLiteAndroidEssential(sqlitedb)
+    val graphInterface = new DBInterfaceSQLiteAndroidGraph(sqlitedb)
     LNParams.secret = secret
 
     val normalBag = new SQLiteNetwork(
@@ -494,7 +488,7 @@ object Main extends App {
     LNParams.cm.notifyResolvers
   }
 
-  class NetworkListener extends ConnectionListener {
+  object NetworkListener extends ConnectionListener {
     override def onOperational(
         worker: CommsTower.Worker,
         theirInit: Init
@@ -522,10 +516,17 @@ object Main extends App {
     Tools.randomKeyPair
 
   CommsTower.listen(
-    Set(new NetworkListener),
+    Set(NetworkListener),
     KeyPairAndPubKey(ourLocalNodeId, remotePeer.nodeId),
     remotePeer
   )
+
+  scala.sys.addShutdownHook {
+    println("shutting down!")
+    LNParams.system.terminate()
+    scala.sys.exit(0)
+    System.exit(0)
+  }
 
   while (true) {
     Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
