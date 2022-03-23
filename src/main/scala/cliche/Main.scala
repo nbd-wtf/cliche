@@ -504,7 +504,9 @@ object Main extends App {
   // listen for outgoing payments
   LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
     override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
-      println("payment failed: ", data.cmd.fullTag.paymentHash)
+      println(
+        s">> payment failed: ${data.cmd.fullTag.paymentHash} parts=${data.parts.size} failure=${data.failuresAsString}"
+      )
     }
 
     override def gotFirstPreimage(
@@ -512,10 +514,7 @@ object Main extends App {
         fulfill: RemoteFulfill
     ): Unit = {
       println(
-        "payment success: ",
-        fulfill.ourAdd.paymentHash,
-        " ~ ",
-        fulfill.theirPreimage
+        s">> payment success: ${fulfill.ourAdd.paymentHash} preimage=${fulfill.theirPreimage} fee=${data.usedFee}"
       )
     }
   }
