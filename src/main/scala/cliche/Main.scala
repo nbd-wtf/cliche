@@ -537,13 +537,6 @@ object Main extends App {
     remotePeer
   )
 
-  scala.sys.addShutdownHook {
-    println("shutting down!")
-    LNParams.system.terminate()
-    scala.sys.exit(0)
-    System.exit(0)
-  }
-
   while (true) {
     Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
   }
