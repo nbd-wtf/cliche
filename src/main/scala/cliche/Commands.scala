@@ -153,13 +153,15 @@ object Commands {
         )
 
     // get our route hints
-    val CommitsAndMax(allowedChans, maxReceivable) =
-      LNParams.cm
-        .maxReceivable(LNParams.cm sortedReceivable LNParams.cm.all.values)
-        .get
-    val hops = allowedChans.map(_.commits.updateOpt).zip(allowedChans).collect {
-      case Some(usableUpdate) ~ ChanAndCommits(_, commits) =>
-        usableUpdate.extraHop(commits.remoteInfo.nodeId) :: Nil
+    val hops = LNParams.cm.maxReceivable(
+      LNParams.cm sortedReceivable LNParams.cm.all.values
+    ) match {
+      case None => List()
+      case Some(CommitsAndMax(allowedChans, _)) =>
+        allowedChans.map(_.commits.updateOpt).zip(allowedChans).collect {
+          case Some(usableUpdate) ~ ChanAndCommits(_, commits) =>
+            usableUpdate.extraHop(commits.remoteInfo.nodeId) :: Nil
+        }
     }
 
     // invoice secret and fake invoice private key
