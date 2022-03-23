@@ -6,46 +6,6 @@ import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
 import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
 import fr.acinq.eclair.wire.CommonCodecs.nodeaddress
-import com.btcontract.wallet.sqlite.{
-  DBInterfaceSQLiteAndroidEssential,
-  DBInterfaceSQLiteAndroidGraph,
-  DBInterfaceSQLiteAndroidMisc,
-  SQLiteDataExtended
-}
-import fr.acinq.bitcoin.ByteVector32.fromValidHex
-import immortan.{
-  ChanFundingTxDescription,
-  Channel,
-  ChannelMaster,
-  CommsTower,
-  ConnectionListener,
-  KeyPairAndPubKey,
-  LNParams,
-  LightningNodeKeys,
-  PathFinder,
-  RemoteNodeInfo,
-  SyncParams,
-  TxDescription,
-  WalletExt,
-  WalletSecret
-}
-import immortan.crypto.Tools.{Any2Some, none, runAnd}
-import immortan.sqlite.{
-  DBInterfaceSQLiteGeneral,
-  HostedChannelAnnouncementTable,
-  HostedChannelUpdateTable,
-  HostedExcludedChannelTable,
-  NormalChannelAnnouncementTable,
-  NormalChannelUpdateTable,
-  NormalExcludedChannelTable,
-  SQLiteChainWallet,
-  SQLiteChannel,
-  SQLiteLNUrlPay,
-  SQLiteLog,
-  SQLiteNetwork,
-  SQLitePayment,
-  SQLiteTx
-}
 import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi, SatoshiLong}
 import fr.acinq.eclair.MilliSatoshi
 import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
@@ -75,6 +35,47 @@ import fr.acinq.eclair.channel.{
 import fr.acinq.eclair.router.Router.RouterConf
 import fr.acinq.eclair.wire.CommonCodecs.nodeaddress
 import fr.acinq.eclair.wire.NodeAddress
+import com.btcontract.wallet.sqlite.{
+  DBInterfaceSQLiteAndroidEssential,
+  DBInterfaceSQLiteAndroidGraph,
+  DBInterfaceSQLiteAndroidMisc,
+  SQLiteDataExtended
+}
+import fr.acinq.bitcoin.ByteVector32.fromValidHex
+import immortan.{
+  ChanFundingTxDescription,
+  Channel,
+  ChannelMaster,
+  CommsTower,
+  ConnectionListener,
+  KeyPairAndPubKey,
+  LNParams,
+  LightningNodeKeys,
+  PathFinder,
+  RemoteNodeInfo,
+  SyncParams,
+  TxDescription,
+  WalletExt,
+  WalletSecret
+}
+import immortan.fsm.{OutgoingPaymentListener, OutgoingPaymentSenderData}
+import immortan.crypto.Tools.{Any2Some, none, runAnd}
+import immortan.sqlite.{
+  DBInterfaceSQLiteGeneral,
+  HostedChannelAnnouncementTable,
+  HostedChannelUpdateTable,
+  HostedExcludedChannelTable,
+  NormalChannelAnnouncementTable,
+  NormalChannelUpdateTable,
+  NormalExcludedChannelTable,
+  SQLiteChainWallet,
+  SQLiteChannel,
+  SQLiteLNUrlPay,
+  SQLiteLog,
+  SQLiteNetwork,
+  SQLitePayment,
+  SQLiteTx
+}
 import immortan.utils.{
   FeeRates,
   FeeRatesInfo,
@@ -117,10 +118,6 @@ import immortan.sqlite._
 import immortan.utils._
 import immortan.wire.ExtCodecs
 import scodec.bits.{ByteVector, HexStringSyntax}
-
-// HC opening stuff
-import immortan.ChannelHosted
-import immortan.fsm.HCOpenHandler
 
 // local
 import cliche.utils.SQLiteUtils
@@ -500,6 +497,25 @@ object Main extends App {
     override def onDisconnect(worker: CommsTower.Worker): Unit = {
       println(
         s"Disconnected from remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
+      )
+    }
+  }
+
+  // listen for outgoing payments
+  LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
+    override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
+      println("payment failed: ", data.cmd.fullTag.paymentHash)
+    }
+
+    override def gotFirstPreimage(
+        data: OutgoingPaymentSenderData,
+        fulfill: RemoteFulfill
+    ): Unit = {
+      println(
+        "payment success: ",
+        fulfill.ourAdd.paymentHash,
+        " ~ ",
+        fulfill.theirPreimage
       )
     }
   }

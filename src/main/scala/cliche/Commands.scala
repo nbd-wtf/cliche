@@ -38,10 +38,10 @@ case class RequestHostedChannel(pubkey: String, host: String, port: Int)
 case class CreateInvoice(
     description: Option[String],
     description_hash: Option[String],
-    msatoshi: Option[Int],
+    msatoshi: Option[Long],
     preimage: Option[String]
 ) extends Command
-case class PayInvoice(bolt11: String, msatoshi: Option[Int]) extends Command
+case class PayInvoice(bolt11: String, msatoshi: Option[Long]) extends Command
 case class CheckInvoice(id: String) extends Command
 case class CheckPayment(payment_hash: String) extends Command
 
@@ -69,9 +69,15 @@ object Commands {
   }
 
   def handle(command: Command): Unit = command match {
+    case GetInfo()                    => Commands.getInfo()
     case params: RequestHostedChannel => Commands.requestHostedChannel(params)
     case params: CreateInvoice        => Commands.createInvoice(params)
+    case params: PayInvoice           => Commands.payInvoice(params)
     case _                            => println("unhandled command", command)
+  }
+
+  def getInfo(): Unit = {
+    println(LNParams.cm.all)
   }
 
   def requestHostedChannel(params: RequestHostedChannel): Unit = {
@@ -198,6 +204,47 @@ object Commands {
     )
 
     println(prExt.raw)
+  }
+
+  def payInvoice(params: PayInvoice): Unit = {
+    Try(PaymentRequestExt.fromUri(params.bolt11)).toOption match {
+      case None => println("invalid invoice")
+      case _    => println("missing amount")
+      case Some(prExt)
+          if prExt.pr.amount.isDefined || params.msatoshi.isDefined => {
+
+        val amount = prExt.pr.amount getOrElse params.msatoshi.get
+        val cmd = LNParams.cm
+          .makeSendCmd(
+            prExt,
+            amount,
+            LNParams.cm.all.values.toList,
+            MilliSatoshi(2000L),
+            true
+          )
+          .modify(_.split.totalSum)
+          .setTo(amount)
+
+        LNParams.cm.payBag.replaceOutgoingPayment(
+          prExt,
+          PaymentDescription(
+            split = None,
+            label = None,
+            semanticOrder = None,
+            invoiceText = prExt.descriptionOpt getOrElse ""
+          ),
+          action = None,
+          amount,
+          MilliSatoshi(0L),
+          LNParams.fiatRates.info.rates,
+          MilliSatoshi(0L),
+          System.currentTimeMillis
+        )
+
+        LNParams.cm.localSend(cmd)
+        println("sent!")
+      }
+    }
   }
 
   def sendPayment(msg: String): Unit = {
