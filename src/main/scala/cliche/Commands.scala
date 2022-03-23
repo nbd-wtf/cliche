@@ -6,17 +6,20 @@ import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, randomBytes32}
 import fr.acinq.eclair.wire.NodeAddress
+import fr.acinq.eclair.payment.{PaymentRequest}
 import immortan.fsm.{HCOpenHandler, SendMultiPart}
 import immortan.{
   ChannelHosted,
   ChannelMaster,
   CommitsAndMax,
+  ChanAndCommits,
   LNParams,
   PathFinder,
   PaymentDescription,
   RemoteNodeInfo
 }
 import immortan.utils.ImplicitJsonFormats._
+import immortan.crypto.Tools.{~}
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.ByteVector32
 import immortan.utils.ImplicitJsonFormats.to
@@ -29,9 +32,18 @@ import util.control.Breaks._
 trait Command
 
 case class NoCommand() extends Command
+case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
     extends Command
-case class Exit() extends Command
+case class CreateInvoice(
+    description: Option[String],
+    description_hash: Option[String],
+    msatoshi: Option[Int],
+    preimage: Option[String]
+) extends Command
+case class PayInvoice(bolt11: String, msatoshi: Option[Int]) extends Command
+case class CheckInvoice(id: String) extends Command
+case class CheckPayment(payment_hash: String) extends Command
 
 object Commands {
   implicit val formats: Formats = DefaultFormats
@@ -39,10 +51,16 @@ object Commands {
   def decode(input: String): Command = {
     try {
       val parsed: JValue = parse(input)
+      val method = parsed \ "method"
+      val params = parsed \ "params"
 
       (parsed \ "method").extract[String] match {
-        case "request-hosted-channel" => parsed.extract[RequestHostedChannel]
-        case "exit"                   => parsed.extract[Exit]
+        case "get-info"               => params.extract[GetInfo]
+        case "request-hosted-channel" => params.extract[RequestHostedChannel]
+        case "create-invoice"         => params.extract[CreateInvoice]
+        case "pay-invoice"            => params.extract[PayInvoice]
+        case "check-invoice"          => params.extract[CheckInvoice]
+        case "check-payment"          => params.extract[CheckPayment]
         case _                        => NoCommand()
       }
     } catch {
@@ -51,13 +69,9 @@ object Commands {
   }
 
   def handle(command: Command): Unit = command match {
-    case Exit() => {
-      println("Shutting down...")
-      LNParams.system.terminate()
-      System.exit(0)
-    }
     case params: RequestHostedChannel => Commands.requestHostedChannel(params)
-    case _                            => {}
+    case params: CreateInvoice        => Commands.createInvoice(params)
+    case _                            => println("unhandled command", command)
   }
 
   def requestHostedChannel(params: RequestHostedChannel): Unit = {
@@ -112,44 +126,77 @@ object Commands {
     }
   }
 
-  def receivePayment(msg: String): Unit = {
-    var userStr: String = msg.split(" ").last
-    var userInput: Option[Int] = Try(userStr.toInt).toOption
+  def createInvoice(params: CreateInvoice): Unit = {
+    // gather params
+    val preimage =
+      params.preimage
+        .flatMap(ByteVector.fromHex(_))
+        .map(new ByteVector32(_))
+        .getOrElse(randomBytes32)
+    val msatoshi = params.msatoshi.map(MilliSatoshi(_))
+    val descriptionTag =
+      params.description
+        .map(PaymentRequest.Description(_))
+        .getOrElse(
+          params.description_hash
+            .flatMap(ByteVector.fromHex(_))
+            .map(new ByteVector32(_))
+            .map(PaymentRequest.DescriptionHash(_))
+            .getOrElse(PaymentRequest.Description(""))
+        )
 
-    if (userInput.isEmpty) {
-      println("Enter receive INTEGER in sat")
-      return
+    // get our route hints
+    val CommitsAndMax(allowedChans, maxReceivable) =
+      LNParams.cm
+        .maxReceivable(LNParams.cm sortedReceivable LNParams.cm.all.values)
+        .get
+    val hops = allowedChans.map(_.commits.updateOpt).zip(allowedChans).collect {
+      case Some(usableUpdate) ~ ChanAndCommits(_, commits) =>
+        usableUpdate.extraHop(commits.remoteInfo.nodeId) :: Nil
     }
 
-    val into = LNParams.cm.all.values
-    val CommitsAndMax(cs, maxReceivable) =
-      LNParams.cm.maxReceivable(LNParams.cm sortedReceivable into).get
-    val pd = PaymentDescription(
-      split = None,
-      label = None,
-      semanticOrder = None,
-      invoiceText = new String
-    )
-    // val descriptionJson: String = "{dummy}"
-    // val description: PaymentDescription = to[PaymentDescription](descriptionJson)
-    val preimage: ByteVector32 = randomBytes32
-    val amountMsat: MilliSatoshi = MilliSatoshi(
-      userInput.getOrElse(0).asInstanceOf[Int] * 1000L
-    )
-    val prExt = LNParams.cm.makePrExt(
-      toReceive = amountMsat,
-      pd,
-      allowedChans = cs,
-      sha256(preimage),
-      randomBytes32
-    )
+    // invoice secret and fake invoice private key
+    val secret = randomBytes32
+    val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
+
+    // build invoice
+    val pr = new PaymentRequest(
+      PaymentRequest.prefixes(LNParams.chainHash),
+      msatoshi,
+      System.currentTimeMillis / 1000L,
+      privateKey.publicKey, {
+        val defaultTags = List(
+          Some(PaymentRequest.PaymentHash(sha256(preimage))),
+          Some(descriptionTag),
+          Some(PaymentRequest.PaymentSecret(secret)),
+          Some(PaymentRequest.Expiry(3600 * 24 * 2 /* 2 days */ )),
+          Some(
+            PaymentRequest.MinFinalCltvExpiry(
+              LNParams.incomingFinalCltvExpiry.toInt
+            )
+          ),
+          Some(PaymentRequest.basicFeatures)
+        ).flatten
+        defaultTags ++ hops.map(PaymentRequest.RoutingInfo)
+      },
+      ByteVector.empty
+    ).sign(privateKey)
+
+    // store invoice on database
+    val prExt = PaymentRequestExt.from(pr)
     LNParams.cm.payBag.replaceIncomingPayment(
-      prExt,
-      preimage,
-      pd,
-      0L.msat,
-      Map.empty
+      prex = prExt,
+      preimage = preimage,
+      description = PaymentDescription(
+        split = None,
+        label = None,
+        semanticOrder = None,
+        invoiceText = ""
+      ),
+      balanceSnap = MilliSatoshi(0L),
+      fiatRateSnap = Map.empty
     )
+
     println(prExt.raw)
   }
 
