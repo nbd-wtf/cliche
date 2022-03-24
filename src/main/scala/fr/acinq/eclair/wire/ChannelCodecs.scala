@@ -38,11 +38,11 @@ object ChannelCodecs {
       ("parent" | int64)
   }.as[ExtendedPublicKey]
 
-  val outPointCodec: Codec[OutPoint] = lengthDelimited(bytes.xmap(d => OutPoint.read(d.toArray), OutPoint.write))
+  val outPointCodec = lengthDelimited(bytes.xmap(d => OutPoint.read(d.toArray), OutPoint.write))
 
-  val txOutCodec: Codec[TxOut] = lengthDelimited(bytes.xmap(d => TxOut.read(d.toArray), TxOut.write))
+  val txOutCodec = lengthDelimited(bytes.xmap(d => TxOut.read(d.toArray), TxOut.write))
 
-  val txCodec: Codec[Transaction] = lengthDelimited(bytes.xmap(d => Transaction.read(d.toArray), Transaction.write))
+  val txCodec = lengthDelimited(bytes.xmap(d => Transaction.read(d.toArray), Transaction.write))
 
   /**
    * byte-aligned boolean codec
@@ -141,9 +141,9 @@ object ChannelCodecs {
       ("htlcKey" | extendedPrivateKeyCodec)
   }.as[ChannelKeys]
 
-  val channelFeaturesCodec = lengthDelimited(bytes).xmap(
-    (b: ByteVector) => ChannelFeatures(Features(b).activated.keySet), // We make no difference between mandatory/optional, both are considered activated
-    (cf: ChannelFeatures) => Features(cf.activated.map(_ -> FeatureSupport.Mandatory).toMap).toByteVector // We encode features as mandatory, by convention
+  val channelFeaturesCodec: Codec[ChannelFeatures] = lengthDelimited(bytes).xmap(
+    (b: ByteVector) => ChannelFeatures(Features(b).activated.keySet), // we make no difference between mandatory/optional, both are considered activated
+    (cf: ChannelFeatures) => Features(cf.activated.map(f => f -> FeatureSupport.Mandatory).toMap).toByteVector // we encode features as mandatory, by convention
   )
 
   val localParamsCodec = {
@@ -180,6 +180,10 @@ object ChannelCodecs {
       (zeropaddedstring(32) withContext "alias")
   }.as[RemoteNodeInfo]
 
+  val channelLabelCodec = (text withContext "label").as[ChannelLabel]
+
+  val extParamsCodec = discriminated[ExtParams].by(uint16).typecase(1, channelLabelCodec)
+
   val commitmentsCodec = {
     (byte withContext "channelFlags") ::
       (bytes32 withContext "channelId") ::
@@ -198,7 +202,7 @@ object ChannelCodecs {
       (uint64overflow withContext "localNextHtlcId") ::
       (uint64overflow withContext "remoteNextHtlcId") ::
       (inputInfoCodec withContext "commitInput") ::
-      (listOfN(uint16, varsizebinarydata) withContext "extParams") ::
+      (listOfN(uint16, extParamsCodec) withContext "extParams") ::
       (int64 withContext "startedAt")
   }.as[NormalCommits]
 
@@ -250,13 +254,13 @@ object ChannelCodecs {
 
   val DATA_WAIT_FOR_FUNDING_LOCKED_Codec = {
     (commitmentsCodec withContext "commitments") ::
-      (shortchannelid withContext "shortChannelId") ::
+      (int64 withContext "shortChannelId") ::
       (lengthDelimited(fundingLockedCodec) withContext "lastSent")
   }.as[DATA_WAIT_FOR_FUNDING_LOCKED]
 
   val DATA_NORMAL_Codec = {
     (commitmentsCodec withContext "commitments") ::
-      (shortchannelid withContext "shortChannelId") ::
+      (int64 withContext "shortChannelId") ::
       (bool8 withContext "feeUpdateRequired") ::
       (listOfN(uint16, varsizebinarydata) withContext "extParams") ::
       (optional(bool8, lengthDelimited(shutdownCodec)) withContext "localShutdown") ::
@@ -300,7 +304,7 @@ object ChannelCodecs {
       (optional(bool8, lengthDelimited(failCodec)) withContext "remoteError") ::
       (optional(bool8, lengthDelimited(resizeChannelCodec)) withContext "resizeProposal") ::
       (optional(bool8, lengthDelimited(stateOverrideCodec)) withContext "overrideProposal") ::
-      (listOfN(uint16, varsizebinarydata) withContext "extParams") ::
+      (listOfN(uint16, extParamsCodec) withContext "extParams") ::
       (int64 withContext "startedAt")
   }.as[HostedCommits]
 

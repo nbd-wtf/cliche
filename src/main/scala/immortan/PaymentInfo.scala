@@ -75,7 +75,7 @@ sealed trait TransactionDetails {
   def updatedAt: Long
   def seenAt: Long
 
-  val date: Date = new Date(seenAt)
+  val date: Date = new Date(updatedAt)
   val description: TransactionDescription
   val identity: String
 }
@@ -138,7 +138,7 @@ case class PaymentInfo(prString: String, preimage: ByteVector32, status: Int, se
 
   lazy val fiatRateSnapshot: Fiat2Btc = to[Fiat2Btc](fiatRatesString)
 
-  lazy val prExt: PaymentRequestExt = PaymentRequestExt.fromRaw(prString)
+  lazy val prExt: PaymentRequestExt = PaymentRequestExt.fromUri(prString)
 
   lazy val action: Option[PaymentAction] = if (actionString == PaymentInfo.NO_ACTION) None else to[PaymentAction](actionString).asSome
 
@@ -146,7 +146,7 @@ case class PaymentInfo(prString: String, preimage: ByteVector32, status: Int, se
 
   def isActivelyHolding(fsm: IncomingPaymentProcessor): Boolean = IncomingPaymentProcessor.RECEIVING == fsm.state && prExt.isEnough(fsm.lastAmountIn) && fsm.isHolding
 
-  def ratio(fsm: IncomingPaymentProcessor): Long = Tools.ratio(received, fsm.lastAmountIn)
+  def ratio(fsm: IncomingPaymentProcessor): Long = Tools.ratio(received, fsm.lastAmountIn).toLong
 }
 
 // Payment actions
@@ -217,7 +217,7 @@ sealed trait TxDescription extends TransactionDescription {
   def canBeCPFPd: Boolean = cpfpBy.isEmpty && cpfpOf.isEmpty
   def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription
   def withNewLabel(label1: Option[String] = None): TxDescription
-  def withNewCpfpBy(txid: ByteVector32): TxDescription
+  def withNewCPFPBy(txid: ByteVector32): TxDescription
 
   def queryText(txid: ByteVector32): String
   def withNodeId: Option[PublicKey] = None
@@ -237,7 +237,7 @@ case class PlainTxDescription(addresses: List[String],
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + addresses.mkString(SEPARATOR) + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
 }
 
 case class OpReturnTxDescription(preimages: List[ByteVector32],
@@ -248,7 +248,7 @@ case class OpReturnTxDescription(preimages: List[ByteVector32],
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + preimages.map(_.toHex).mkString(SEPARATOR) + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
   override def canBeCPFPd: Boolean = false
 }
 
@@ -265,7 +265,7 @@ case class ChanFundingTxDescription(nodeId: PublicKey,
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + nodeId.toString + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
   override def canBeCPFPd: Boolean = false
 }
 
@@ -277,7 +277,7 @@ case class ChanRefundingTxDescription(nodeId: PublicKey,
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + nodeId.toString + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
 }
 
 case class HtlcClaimTxDescription(nodeId: PublicKey,
@@ -288,7 +288,7 @@ case class HtlcClaimTxDescription(nodeId: PublicKey,
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + nodeId.toString + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
 }
 
 case class PenaltyTxDescription(nodeId: PublicKey,
@@ -299,7 +299,7 @@ case class PenaltyTxDescription(nodeId: PublicKey,
   override def queryText(txid: ByteVector32): String = txid.toHex + SEPARATOR + nodeId.toString + SEPARATOR + label.getOrElse(new String)
   override def withNewOrderCond(order: Option[SemanticOrder] = None): TxDescription = if (semanticOrder.isDefined) me else copy(semanticOrder = order)
   override def withNewLabel(label1: Option[String] = None): TxDescription = copy(label = label1)
-  override def withNewCpfpBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
+  override def withNewCPFPBy(txid: ByteVector32): TxDescription = copy(cpfpBy = txid.asSome)
 }
 
 object TxDescription {

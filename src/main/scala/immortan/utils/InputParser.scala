@@ -3,7 +3,9 @@ package immortan.utils
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{BtcAmount, Satoshi, SatoshiLong}
 import fr.acinq.eclair._
-import fr.acinq.eclair.payment.PaymentRequest
+import fr.acinq.eclair.payment.Bolt11Invoice
+import fr.acinq.eclair.router.Graph.GraphStructure
+import fr.acinq.eclair.router.RouteCalculation
 import fr.acinq.eclair.wire.NodeAddress
 import immortan.crypto.Tools.trimmed
 import immortan.utils.InputParser._
@@ -26,7 +28,7 @@ object InputParser {
     case _ => value = null // Erase recorded value
   }
 
-  private[this] val prefixes = PaymentRequest.prefixes.values mkString "|"
+  private[this] val prefixes = Bolt11Invoice.prefixes.values mkString "|"
 
   private[this] val lnUrl = "(?im).*?(lnurl)([0-9]+[a-z0-9]+)".r.unanchored
 
@@ -48,17 +50,16 @@ object InputParser {
     case lnUrl(prefix, data) => LNUrl.fromBech32(s"$prefix$data")
     case nodeLink(key, host, port) => RemoteNodeInfo(PublicKey.fromBin(ByteVector fromValidHex key), NodeAddress.fromParts(host, port.toInt), host)
     case shortNodeLink(key, host) => RemoteNodeInfo(PublicKey.fromBin(ByteVector fromValidHex key), NodeAddress.fromParts(host, port = 9735), host)
-    case lnPayReq(prefix, data) => PaymentRequestExt.fromRaw(s"$prefix$data")
 
     case _ =>
-      val withoutPrefix = PaymentRequestExt.removePrefix(rawInput).trim
-      val isLightningInvoice = rawInput.toLowerCase.startsWith(lightning)
-      val isIdentifier = identifier.findFirstMatchIn(withoutPrefix).isDefined
+      val withoutSlashes = PaymentRequestExt.removePrefix(rawInput).trim
+      val isLightningInvoice = lnPayReq.findFirstMatchIn(rawInput).isDefined
+      val isIdentifier = identifier.findFirstMatchIn(withoutSlashes).isDefined
       val addressToAmount = MultiAddressParser.parseAll(MultiAddressParser.parse, rawInput)
 
-      if (isIdentifier) LNUrl.fromIdentifier(withoutPrefix)
-      else if (isLightningInvoice) PaymentRequestExt.fromUri(withoutPrefix.toLowerCase)
-      else addressToAmount getOrElse BitcoinUri.fromRaw(s"$bitcoin$withoutPrefix")
+      if (isIdentifier) LNUrl.fromIdentifier(withoutSlashes)
+      else if (isLightningInvoice) PaymentRequestExt.fromUri(withoutSlashes.toLowerCase)
+      else addressToAmount getOrElse BitcoinUri.fromRaw(s"$bitcoin$withoutSlashes")
   }
 }
 
@@ -71,31 +72,27 @@ object PaymentRequestExt {
 
   def withoutSlashes(prefix: String, uri: Uri): String = prefix + removePrefix(uri.toString)
 
-  def fromUri(invoiceWithoutPrefix: String): PaymentRequestExt = {
-    val lnPayReq(invoicePrefix, invoiceData) = invoiceWithoutPrefix
-    val uri = Try(Uri parse s"$lightning//$invoiceWithoutPrefix")
-    val pr = PaymentRequest.read(s"$invoicePrefix$invoiceData")
+  def fromUri(invoiceWithoutSlashes: String): PaymentRequestExt = {
+    val lnPayReq(invoicePrefix, invoiceData) = invoiceWithoutSlashes
+    val pr = Bolt11Invoice.fromString(s"$invoicePrefix$invoiceData")
+    val uri = Try(Uri parse s"$lightning//$invoiceWithoutSlashes")
     PaymentRequestExt(uri, pr, s"$invoicePrefix$invoiceData")
   }
 
-  def fromRaw(raw: String): PaymentRequestExt = {
+  def from(pr: Bolt11Invoice): PaymentRequestExt = {
     val noUri: Try[Uri] = Failure(new RuntimeException)
-    PaymentRequestExt(noUri, PaymentRequest.read(raw), raw)
-  }
-
-  def from(pr: PaymentRequest): PaymentRequestExt = {
-    val noUri: Try[Uri] = Failure(new RuntimeException)
-    PaymentRequestExt(noUri, pr, PaymentRequest write pr)
+    PaymentRequestExt(noUri, pr, pr.toString)
   }
 }
 
-case class PaymentRequestExt(uri: Try[Uri], pr: PaymentRequest, raw: String) {
-  def isEnough(collected: MilliSatoshi): Boolean = pr.amount.exists(originallyAsked => collected >= originallyAsked)
+case class PaymentRequestExt(uri: Try[Uri], pr: Bolt11Invoice, raw: String) {
+  def isEnough(collected: MilliSatoshi): Boolean = pr.amountOpt.exists(requested => collected >= requested)
   def withNewSplit(anotherPart: MilliSatoshi): String = s"$lightning$raw?splits=" + (anotherPart :: splits).map(_.toLong).mkString(",")
+  lazy val extraEdges: Set[GraphStructure.GraphEdge] = RouteCalculation.makeExtraEdges(pr.routingInfo, pr.nodeId)
 
   val splits: List[MilliSatoshi] = uri.map(_.getQueryParameter("splits").split(',').toList.map(_.toLong) map MilliSatoshi.apply).getOrElse(Nil)
-  val hasSplitIssue: Boolean = pr.amount.exists(splits.sum + LNParams.minPayment > _) || (pr.amount.isEmpty && splits.nonEmpty)
-  val splitLeftover: MilliSatoshi = pr.amount.map(_ - splits.sum).getOrElse(0L.msat)
+  val hasSplitIssue: Boolean = pr.amountOpt.exists(splits.sum + LNParams.minPayment > _) || (pr.amountOpt.isEmpty && splits.nonEmpty)
+  val splitLeftover: MilliSatoshi = pr.amountOpt.map(_ - splits.sum).getOrElse(0L.msat)
 
   val descriptionOpt: Option[String] = pr.description.left.toOption.map(trimmed).filter(_.nonEmpty)
   val brDescription: String = descriptionOpt.map(desc => s"<br><br>$desc").getOrElse(new String)
@@ -111,7 +108,7 @@ object BitcoinUri {
 
 case class BitcoinUri(uri: Try[Uri], address: String) {
   val amount: Option[MilliSatoshi] = uri.map(_ getQueryParameter "amount").map(BigDecimal.apply).map(Denomination.btcBigDecimal2MSat).toOption
-  val prExt: Option[PaymentRequestExt] = uri.map(_ getQueryParameter "lightning").map(PaymentRequestExt.fromRaw).toOption
+  val prExt: Option[PaymentRequestExt] = uri.map(_ getQueryParameter "lightning").map(PaymentRequestExt.fromUri).toOption
   val message: Option[String] = uri.map(_ getQueryParameter "message").map(trimmed).filter(_.nonEmpty).toOption
   val label: Option[String] = uri.map(_ getQueryParameter "label").map(trimmed).filter(_.nonEmpty).toOption
 }

@@ -29,6 +29,8 @@ lazy val root = (project in file("."))
       "com.google.guava" % "guava" % "29.0-android",
       "org.scala-lang.modules" %% "scala-parser-combinators" % "2.1.0",
       "com.sparrowwallet" % "hummingbird" % "1.6.2",
+      "com.squareup.okhttp3" % "okhttp" % "4.9.0",
+      "fr.acinq.secp256k1" % "secp256k1-kmp-jni-android" % "0.5.2",
       // Config
       "com.iheart" % "ficus_2.11" % "1.5.0",
       // Testing

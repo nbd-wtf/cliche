@@ -27,14 +27,6 @@ object ElectrumWalletType {
     case _ => throw new RuntimeException
   }
 
-  def makeWatchingType(tag: String, xPub: ExtendedPublicKey, chainHash: ByteVector32): ElectrumWalletType = tag match {
-    case EclairWallet.BIP32 => new ElectrumWallet32(secrets = None, xPub, chainHash)
-    case EclairWallet.BIP44 => new ElectrumWallet44(secrets = None, xPub, chainHash)
-    case EclairWallet.BIP49 => new ElectrumWallet49(secrets = None, xPub, chainHash)
-    case EclairWallet.BIP84 => new ElectrumWallet84(secrets = None, xPub, chainHash)
-    case _ => throw new RuntimeException
-  }
-
   def xPriv32(master: ExtendedPrivateKey, chainHash: ByteVector32): AccountAndXPrivKey = chainHash match {
     case Block.RegtestGenesisBlock.hash => AccountAndXPrivKey(derivePrivateKey(master, hardened(1L) :: 0L :: Nil), master)
     case Block.TestnetGenesisBlock.hash => AccountAndXPrivKey(derivePrivateKey(master, hardened(1L) :: 0L :: Nil), master)
@@ -81,13 +73,13 @@ abstract class ElectrumWalletType {
 
   def extractPubKeySpentFrom(txIn: TxIn): Option[PublicKey]
 
-  def setUtxosWithDummySig(usableUtxos: Seq[Utxo], tx: Transaction, sequenceFlag: Long): Transaction
-
   def signTransaction(usableUtxos: Seq[Utxo], tx: Transaction): Transaction
 
-  def computeScriptHashFromPublicKey(key: PublicKey): ByteVector32 = {
-    val serializedPubKeyScript: Seq[ScriptElt] = computePublicKeyScript(key)
-    Crypto.sha256(Script write serializedPubKeyScript).reverse
+  def setUtxosWithDummySig(usableUtxos: Seq[Utxo], tx: Transaction, sequenceFlag: Long): Transaction
+
+  def writePublicKeyScriptHash(key: PublicKey): ByteVector = {
+    val scriptProgram = computePublicKeyScript(key)
+    Script.write(scriptProgram)
   }
 }
 
@@ -116,7 +108,7 @@ class ElectrumWallet44(val secrets: Option[AccountAndXPrivKey], val xPub: Extend
       (txIn, idx) <- tx.txIn.zipWithIndex
       utxo <- usableUtxos.find(_.item.outPoint == txIn.outPoint)
       previousOutputScript = Script.pay2pkh(pubKey = utxo.key.publicKey)
-      privateKey = derivePrivateKey(secrets.get.master, utxo.key.path).privateKey
+      privateKey = derivePrivateKey(secrets.map(_.master).getOrElse(fr.acinq.eclair.dummyExtPrivKey), utxo.key.path).privateKey
       sig = Transaction.signInput(tx, idx, previousOutputScript, SIGHASH_ALL, utxo.item.value.sat, SigVersion.SIGVERSION_BASE, privateKey)
       sigScript = Script.write(OP_PUSHDATA(sig) :: OP_PUSHDATA(utxo.key.publicKey) :: Nil)
     } yield txIn.copy(signatureScript = sigScript)
@@ -126,7 +118,11 @@ class ElectrumWallet44(val secrets: Option[AccountAndXPrivKey], val xPub: Extend
 
 class ElectrumWallet32(override val secrets: Option[AccountAndXPrivKey], override val xPub: ExtendedPublicKey, override val chainHash: ByteVector32) extends ElectrumWallet44(secrets, xPub, chainHash) {
 
-  override val changeMaster: ExtendedPublicKey = derivePublicKey(xPub, 1)
+  override val changeMaster: ExtendedPublicKey = {
+    val bip32ChangePath = KeyPath(hardened(0L) :: 1L :: Nil)
+    val priv = derivePrivateKey(secrets.get.master, bip32ChangePath)
+    publicKey(priv)
+  }
 
   override val accountMaster: ExtendedPublicKey = xPub
 }
@@ -161,7 +157,7 @@ class ElectrumWallet49(val secrets: Option[AccountAndXPrivKey], val xPub: Extend
       (txIn, idx) <- tx.txIn.zipWithIndex
       utxo <- usableUtxos.find(_.item.outPoint == txIn.outPoint)
       pubKeyScript = Script.write(Script pay2wpkh utxo.key.publicKey)
-      privateKey = derivePrivateKey(secrets.get.master, utxo.key.path).privateKey
+      privateKey = derivePrivateKey(secrets.map(_.master).getOrElse(fr.acinq.eclair.dummyExtPrivKey), utxo.key.path).privateKey
       sig = Transaction.signInput(tx, idx, Script.pay2pkh(utxo.key.publicKey), SIGHASH_ALL, utxo.item.value.sat, SigVersion.SIGVERSION_WITNESS_V0, privateKey)
     } yield txIn.copy(signatureScript = Script.write(OP_PUSHDATA(pubKeyScript) :: Nil), witness = ScriptWitness(sig :: utxo.key.publicKey.value :: Nil))
     tx.copy(txIn = txIn1)
@@ -188,7 +184,7 @@ class ElectrumWallet84(val secrets: Option[AccountAndXPrivKey], val xPub: Extend
     val txIn1 = for {
       (txIn, idx) <- tx.txIn.zipWithIndex
       utxo <- usableUtxos.find(_.item.outPoint == txIn.outPoint)
-      privateKey = derivePrivateKey(secrets.get.master, utxo.key.path).privateKey
+      privateKey = derivePrivateKey(secrets.map(_.master).getOrElse(fr.acinq.eclair.dummyExtPrivKey), utxo.key.path).privateKey
       sig = Transaction.signInput(tx, idx, Script.pay2pkh(utxo.key.publicKey), SIGHASH_ALL, utxo.item.value.sat, SigVersion.SIGVERSION_WITNESS_V0, privateKey)
     } yield txIn.copy(witness = ScriptWitness(sig :: utxo.key.publicKey.value :: Nil), signatureScript = ByteVector.empty)
     tx.copy(txIn = txIn1)

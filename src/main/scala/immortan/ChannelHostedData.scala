@@ -17,7 +17,7 @@ case class WaitRemoteHostedStateUpdate(remoteInfo: RemoteNodeInfo, hc: HostedCom
 case class HostedCommits(remoteInfo: RemoteNodeInfo, localSpec: CommitmentSpec, lastCrossSignedState: LastCrossSignedState,
                          nextLocalUpdates: List[UpdateMessage], nextRemoteUpdates: List[UpdateMessage], updateOpt: Option[ChannelUpdate], postErrorOutgoingResolvedIds: Set[Long],
                          localError: Option[Fail], remoteError: Option[Fail], resizeProposal: Option[ResizeChannel] = None, overrideProposal: Option[StateOverride] = None,
-                         extParams: List[ByteVector] = Nil, startedAt: Long = System.currentTimeMillis) extends PersistentChannelData with Commitments { me =>
+                         extParams: List[ExtParams] = Nil, startedAt: Long = System.currentTimeMillis) extends PersistentChannelData with Commitments { me =>
 
   lazy val error: Option[Fail] = localError.orElse(remoteError)
 
@@ -46,10 +46,13 @@ case class HostedCommits(remoteInfo: RemoteNodeInfo, localSpec: CommitmentSpec, 
 
   lazy val availableForSend: MilliSatoshi = nextLocalSpec.toLocal
 
+  override def ourBalance: MilliSatoshi = availableForSend
+
   def nextLocalUnsignedLCSS(blockDay: Long): LastCrossSignedState =
-    LastCrossSignedState(lastCrossSignedState.isHost, lastCrossSignedState.refundScriptPubKey, lastCrossSignedState.initHostedChannel, blockDay = blockDay,
-      localBalanceMsat = nextLocalSpec.toLocal, remoteBalanceMsat = nextLocalSpec.toRemote, nextTotalLocal, nextTotalRemote, nextLocalSpec.incomingAdds.toList.sortBy(_.id),
-      nextLocalSpec.outgoingAdds.toList.sortBy(_.id), localSigOfRemote = ByteVector64.Zeroes, remoteSigOfLocal = ByteVector64.Zeroes)
+    LastCrossSignedState(lastCrossSignedState.isHost, lastCrossSignedState.refundScriptPubKey, lastCrossSignedState.initHostedChannel,
+      blockDay = blockDay, localBalanceMsat = nextLocalSpec.toLocal, remoteBalanceMsat = nextLocalSpec.toRemote, nextTotalLocal, nextTotalRemote,
+      nextLocalSpec.incomingAdds.toList.sortBy(_.id), nextLocalSpec.outgoingAdds.toList.sortBy(_.id), localSigOfRemote = ByteVector64.Zeroes,
+      remoteSigOfLocal = ByteVector64.Zeroes)
 
   def addLocalProposal(update: UpdateMessage): HostedCommits = copy(nextLocalUpdates = nextLocalUpdates :+ update)
   def addRemoteProposal(update: UpdateMessage): HostedCommits = copy(nextRemoteUpdates = nextRemoteUpdates :+ update)
@@ -65,24 +68,24 @@ case class HostedCommits(remoteInfo: RemoteNodeInfo, localSpec: CommitmentSpec, 
     if (commits1.nextLocalSpec.outgoingAdds.size > lastCrossSignedState.initHostedChannel.maxAcceptedHtlcs) return ChannelNotAbleToSend(cmd.incompleteAdd).asLeft
     if (commits1.allOutgoing.foldLeft(0L.msat)(_ + _.amountMsat) > maxSendInFlight) return ChannelNotAbleToSend(cmd.incompleteAdd).asLeft
     if (commits1.nextLocalSpec.toLocal < 0L.msat) return ChannelNotAbleToSend(cmd.incompleteAdd).asLeft
-    Right((commits1, completeAdd))
+    Right(commits1, completeAdd)
   }
 
   def receiveAdd(add: UpdateAddHtlc): HostedCommits = {
     val commits1: HostedCommits = addRemoteProposal(add)
     // We do not check whether total incoming amount exceeds maxHtlcValueInFlightMsat becase we always accept up to channel capacity
-    if (commits1.nextLocalSpec.incomingAdds.size > lastCrossSignedState.initHostedChannel.maxAcceptedHtlcs) throw ChannelTransitionFail(channelId)
-    if (commits1.nextLocalSpec.toRemote < 0L.msat) throw ChannelTransitionFail(channelId)
-    if (add.id != nextTotalRemote + 1) throw ChannelTransitionFail(channelId)
+    if (commits1.nextLocalSpec.incomingAdds.size > lastCrossSignedState.initHostedChannel.maxAcceptedHtlcs) throw ChannelTransitionFail(channelId, add)
+    if (commits1.nextLocalSpec.toRemote < 0L.msat) throw ChannelTransitionFail(channelId, add)
+    if (add.id != nextTotalRemote + 1) throw ChannelTransitionFail(channelId, add)
     commits1
   }
 
   // Relaxed constraints for receiveng preimages over HCs: we look at nextLocalSpec, not localSpec
   def makeRemoteFulfill(fulfill: UpdateFulfillHtlc): RemoteFulfill = nextLocalSpec.findOutgoingHtlcById(fulfill.id) match {
-    case Some(ourAdd) if ourAdd.add.paymentHash != fulfill.paymentHash => throw ChannelTransitionFail(channelId)
-    case _ if postErrorOutgoingResolvedIds.contains(fulfill.id) => throw ChannelTransitionFail(channelId)
+    case Some(ourAdd) if ourAdd.add.paymentHash != fulfill.paymentHash => throw ChannelTransitionFail(channelId, fulfill)
+    case _ if postErrorOutgoingResolvedIds.contains(fulfill.id) => throw ChannelTransitionFail(channelId, fulfill)
     case Some(ourAdd) => RemoteFulfill(ourAdd.add, fulfill.paymentPreimage)
-    case None => throw ChannelTransitionFail(channelId)
+    case None => throw ChannelTransitionFail(channelId, fulfill)
   }
 
   def withResize(resize: ResizeChannel): HostedCommits =

@@ -10,15 +10,20 @@ import scodec.codecs._
 
 object LightningMessageCodecs {
 
-  val featuresCodec: Codec[Features] = varsizebinarydata.xmap[Features](Features.apply, _.toByteVector)
+  val featuresCodec: Codec[Features[FeatureScope]] = varsizebinarydata.xmap[Features[FeatureScope]](
+    { bytes => Features(bytes) },
+    { features => features.toByteVector }
+  )
+
+  val initFeaturesCodec: Codec[Features[InitFeature]] = featuresCodec.xmap[Features[InitFeature]](_.initFeatures, _.unscoped)
 
   /** For historical reasons, features are divided into two feature bitmasks. We only send from the second one, but we allow receiving in both. */
-  val combinedFeaturesCodec: Codec[Features] = (
+  val combinedFeaturesCodec: Codec[Features[InitFeature]] = (
     ("globalFeatures" | varsizebinarydata) ::
-      ("localFeatures" | varsizebinarydata)).as[(ByteVector, ByteVector)].xmap[Features](
+      ("localFeatures" | varsizebinarydata)).as[(ByteVector, ByteVector)].xmap[Features[InitFeature]](
     { case (gf, lf) =>
       val length = gf.length.max(lf.length)
-      Features(gf.padLeft(length) | lf.padLeft(length))
+      Features(gf.padLeft(length) | lf.padLeft(length)).initFeatures()
     },
     { features => (ByteVector.empty, features.toByteVector) })
 
@@ -114,7 +119,7 @@ object LightningMessageCodecs {
       ("amountMsat" | millisatoshi) ::
       ("paymentHash" | bytes32) ::
       ("expiry" | cltvExpiry) ::
-      ("onionRoutingPacket" | OnionCodecs.paymentOnionPacketCodec) ::
+      ("onionRoutingPacket" | PaymentOnionCodecs.paymentOnionPacketCodec) ::
       ("tlvStream" | PaymentTagTlv.codec)
   }.as[UpdateAddHtlc]
 
@@ -153,7 +158,7 @@ object LightningMessageCodecs {
 
   val announcementSignaturesCodec = {
     ("channelId" | bytes32) ::
-      ("shortChannelId" | shortchannelid) ::
+      ("shortChannelId" | int64) ::
       ("nodeSignature" | bytes64) ::
       ("bitcoinSignature" | bytes64)
   }.as[AnnouncementSignatures]
@@ -161,7 +166,7 @@ object LightningMessageCodecs {
   val channelAnnouncementWitnessCodec =
     ("features" | featuresCodec) ::
       ("chainHash" | bytes32) ::
-      ("shortChannelId" | shortchannelid) ::
+      ("shortChannelId" | int64) ::
       ("nodeId1" | publicKey) ::
       ("nodeId2" | publicKey) ::
       ("bitcoinKey1" | publicKey) ::
@@ -189,7 +194,7 @@ object LightningMessageCodecs {
 
   val channelUpdateChecksumCodec =
     ("chainHash" | bytes32) ::
-      ("shortChannelId" | shortchannelid) ::
+      ("shortChannelId" | int64) ::
       (("messageFlags" | byte) >>:~ { messageFlags =>
         ("channelFlags" | byte) ::
           ("cltvExpiryDelta" | cltvExpiryDelta) ::
@@ -201,7 +206,7 @@ object LightningMessageCodecs {
 
   val channelUpdateWitnessCodec =
     ("chainHash" | bytes32) ::
-      ("shortChannelId" | shortchannelid) ::
+      ("shortChannelId" | int64) ::
       ("timestamp" | uint32) ::
       (("messageFlags" | byte) >>:~ { messageFlags =>
         ("channelFlags" | byte) ::
@@ -220,10 +225,10 @@ object LightningMessageCodecs {
       .\(0) {
         case a@EncodedShortChannelIds(_, Nil) => a // empty list is always encoded with encoding type 'uncompressed' for compatibility with other implementations
         case a@EncodedShortChannelIds(EncodingType.UNCOMPRESSED, _) => a
-      }((provide[EncodingType](EncodingType.UNCOMPRESSED) :: list(shortchannelid)).as[EncodedShortChannelIds])
+      }((provide[EncodingType](EncodingType.UNCOMPRESSED) :: list(int64)).as[EncodedShortChannelIds])
       .\(1) {
         case a@EncodedShortChannelIds(EncodingType.COMPRESSED_ZLIB, _) => a
-      }((provide[EncodingType](EncodingType.COMPRESSED_ZLIB) :: zlib(list(shortchannelid))).as[EncodedShortChannelIds])
+      }((provide[EncodingType](EncodingType.COMPRESSED_ZLIB) :: zlib(list(int64))).as[EncodedShortChannelIds])
 
 
   val queryShortChannelIdsCodec = {
@@ -478,17 +483,13 @@ object LightningMessageCodecs {
   // TRAMPOLINE STATUS
 
   val trampolineOnCodec = {
-    (millisatoshi withContext "minimumMsat") ::
-      (millisatoshi withContext "maximumMsat") ::
-      (millisatoshi withContext "feeBaseMsat") ::
+    (millisatoshi withContext "minMsat") ::
+      (millisatoshi withContext "maxMsat") ::
       (uint32 withContext "feeProportionalMillionths") ::
       (double withContext "exponent") ::
       (double withContext "logExponent") ::
       (cltvExpiryDelta withContext "cltvExpiryDelta")
   }.as[TrampolineOn]
-
-  final val TRAMPOLINE_STATUS_ON_TAG = 44789
-  final val TRAMPOLINE_STATUS_UNDESIRED_TAG = 44787
 
   //
 
@@ -569,9 +570,6 @@ object LightningMessageCodecs {
       case SWAP_OUT_TRANSACTION_RESPONSE_MESSAGE_TAG => swapOutTransactionResponseCodec
       case SWAP_OUT_TRANSACTION_DENIED_MESSAGE_TAG => swapOutTransactionDeniedCodec
       case SWAP_OUT_FEERATES_MESSAGE_TAG => swapOutFeeratesCodec
-
-      case TRAMPOLINE_STATUS_UNDESIRED_TAG => provide(TrampolineUndesired)
-      case TRAMPOLINE_STATUS_ON_TAG => trampolineOnCodec
       case _ => throw new RuntimeException
     }
 
@@ -606,9 +604,6 @@ object LightningMessageCodecs {
     case msg: SwapOutTransactionResponse => UnknownMessage(SWAP_OUT_TRANSACTION_RESPONSE_MESSAGE_TAG, swapOutTransactionResponseCodec.encode(msg).require.toByteVector)
     case msg: SwapOutTransactionDenied => UnknownMessage(SWAP_OUT_TRANSACTION_DENIED_MESSAGE_TAG, swapOutTransactionDeniedCodec.encode(msg).require.toByteVector)
     case msg: SwapOutFeerates => UnknownMessage(SWAP_OUT_FEERATES_MESSAGE_TAG, swapOutFeeratesCodec.encode(msg).require.toByteVector)
-
-    case TrampolineUndesired => UnknownMessage(TRAMPOLINE_STATUS_UNDESIRED_TAG, provide(TrampolineUndesired).encode(TrampolineUndesired).require.toByteVector)
-    case msg: TrampolineOn => UnknownMessage(TRAMPOLINE_STATUS_ON_TAG, trampolineOnCodec.encode(msg).require.toByteVector)
     case _ => msg
   }
 

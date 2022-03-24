@@ -5,14 +5,13 @@ import fr.acinq.bitcoin.DeterministicWallet._
 import fr.acinq.bitcoin._
 import fr.acinq.eclair._
 import fr.acinq.eclair.blockchain.TxConfirmedAt
-import fr.acinq.eclair.blockchain.electrum.ElectrumWallet.GenerateTxResponse
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.crypto.Generators
 import fr.acinq.eclair.crypto.Sphinx.PacketAndSecrets
-import fr.acinq.eclair.payment.IncomingPacket
+import fr.acinq.eclair.payment.IncomingPaymentPacket
 import fr.acinq.eclair.transactions.Transactions._
 import fr.acinq.eclair.transactions.{CommitmentSpec, Transactions}
-import fr.acinq.eclair.wire.Onion.FinalPayload
+import fr.acinq.eclair.wire.PaymentOnion.FinalPayload
 import fr.acinq.eclair.wire._
 import immortan.crypto.Tools
 import immortan.{LNParams, RemoteNodeInfo}
@@ -29,9 +28,8 @@ case class InPrincipleNotSendable(localAdd: UpdateAddHtlc) extends LocalReject
 
 
 case class INPUT_INIT_FUNDEE(remoteInfo: RemoteNodeInfo, localParams: LocalParams, remoteInit: Init, channelFeatures: ChannelFeatures, theirOpen: OpenChannel)
-case class INPUT_INIT_FUNDER(remoteInfo: RemoteNodeInfo, temporaryChannelId: ByteVector32, fakeFunding: GenerateTxResponse, pushAmount: MilliSatoshi,
-                             fundingFeeratePerKw: FeeratePerKw, initialFeeratePerKw: FeeratePerKw, localParams: LocalParams, remoteInit: Init,
-                             channelFlags: Byte, channelFeatures: ChannelFeatures)
+case class INPUT_INIT_FUNDER(remoteInfo: RemoteNodeInfo, temporaryChannelId: ByteVector32, fundingAmount: Satoshi, pushAmount: MilliSatoshi, fundingFeeratePerKw: FeeratePerKw,
+                             initialFeeratePerKw: FeeratePerKw, localParams: LocalParams, remoteInit: Init, channelFlags: Byte, channelFeatures: ChannelFeatures)
 
 
 sealed trait BitcoinEvent
@@ -50,12 +48,12 @@ sealed trait ReasonableResolution extends IncomingResolution {
   val add: UpdateAddHtlc
 }
 
-case class ReasonableTrampoline(packet: IncomingPacket.NodeRelayPacket, secret: PrivateKey) extends ReasonableResolution {
+case class ReasonableTrampoline(packet: IncomingPaymentPacket.NodeRelayPacket, secret: PrivateKey) extends ReasonableResolution {
   val fullTag: FullPaymentTag = FullPaymentTag(packet.add.paymentHash, packet.outerPayload.paymentSecret, PaymentTagTlv.TRAMPLOINE_ROUTED)
   val add: UpdateAddHtlc = packet.add
 }
 
-case class ReasonableLocal(packet: IncomingPacket.FinalPacket, secret: PrivateKey) extends ReasonableResolution {
+case class ReasonableLocal(packet: IncomingPaymentPacket.FinalPacket, secret: PrivateKey) extends ReasonableResolution {
   val fullTag: FullPaymentTag = FullPaymentTag(packet.add.paymentHash, packet.payload.paymentSecret, PaymentTagTlv.FINAL_INCOMING)
   val add: UpdateAddHtlc = packet.add
 }
@@ -84,6 +82,7 @@ case class CMD_ADD_HTLC(fullTag: FullPaymentTag, firstAmount: MilliSatoshi, cltv
 }
 
 object CMD_CLOSE {
+  final val AWAITING_REMOTE_FORCE_CLOSE = "awaiting-remote-force-close"
   final val INVALID_CLOSING_PUBKEY = "invalid-closing-pubkey"
   final val ALREADY_IN_PROGRESS = "already-in-progress"
   final val CHANNEL_BUSY = "channel-busy"
@@ -98,13 +97,16 @@ case object CMD_CHECK_FEERATE extends Command
 case object CMD_SIGN extends Command
 
 
-trait ChannelData
+trait ChannelData {
+  def ourBalance: MilliSatoshi = 0L.msat
+}
 
 trait PersistentChannelData extends ChannelData {
   def channelId: ByteVector32
 }
 
 sealed trait HasNormalCommitments extends PersistentChannelData {
+  override def ourBalance: MilliSatoshi = commitments.latestReducedRemoteSpec.toRemote
   override def channelId: ByteVector32 = commitments.channelId
   def withNewCommits(cs: NormalCommits): HasNormalCommitments
   def commitments: NormalCommits
@@ -162,11 +164,11 @@ final case class DATA_WAIT_FOR_FUNDING_CONFIRMED(commitments: NormalCommits, fun
   override def withNewCommits(cs: NormalCommits): HasNormalCommitments = copy(commitments = cs)
 }
 
-final case class DATA_WAIT_FOR_FUNDING_LOCKED(commitments: NormalCommits, shortChannelId: ShortChannelId, lastSent: FundingLocked) extends ChannelData with HasNormalCommitments {
+final case class DATA_WAIT_FOR_FUNDING_LOCKED(commitments: NormalCommits, shortChannelId: Long, lastSent: FundingLocked) extends ChannelData with HasNormalCommitments {
   override def withNewCommits(cs: NormalCommits): HasNormalCommitments = copy(commitments = cs)
 }
 
-final case class DATA_NORMAL(commitments: NormalCommits, shortChannelId: ShortChannelId, feeUpdateRequired: Boolean = false, extParams: List[ByteVector] = Nil,
+final case class DATA_NORMAL(commitments: NormalCommits, shortChannelId: Long, feeUpdateRequired: Boolean = false, extParams: List[ByteVector] = Nil,
                              localShutdown: Option[Shutdown] = None, remoteShutdown: Option[Shutdown] = None) extends ChannelData with HasNormalCommitments {
 
   override def withNewCommits(cs: NormalCommits): HasNormalCommitments = copy(commitments = cs)
@@ -310,12 +312,16 @@ case class ChannelReserveTooHigh(channelId: ByteVector32, reserveToFundingRatio:
   override def toString: String = s"DustLimitTooSmall, reserveToFundingRatio=$reserveToFundingRatio, maxReserveToFundingRatio=$maxReserveToFundingRatio"
 }
 
-case class ChannelTransitionFail(channelId: ByteVector32) extends RuntimeException {
-  override def toString: String = s"ChannelTransitionFail, details: $getMessage"
+case class ExpiredHtlcInNormalChannel(channelId: ByteVector32, sentExpiredRouted: Boolean, expiredReceivedRevealed: Boolean) extends RuntimeException {
+  override def toString: String = s"ChannelTransitionFail, sentExpiredRouted=$sentExpiredRouted, expiredReceivedRevealed=$expiredReceivedRevealed"
+}
+
+case class ChannelTransitionFail(channelId: ByteVector32, message: LightningMessage) extends RuntimeException {
+  override def toString: String = s"ChannelTransitionFail, related message=$message"
 }
 
 case class RemoteErrorException(details: String) extends RuntimeException {
-  override def toString: String = s"RemoteErrorException, details: $details"
+  override def toString: String = s"RemoteErrorException, details=$details"
 }
 
 case class CMDException(reason: String, cmd: Command) extends RuntimeException

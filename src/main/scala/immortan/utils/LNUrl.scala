@@ -1,12 +1,12 @@
 package immortan.utils
 
-import com.github.kevinsawicki.http.HttpRequest
 import com.google.common.base.CharMatcher
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{Bech32, ByteVector32, ByteVector64, Crypto}
 import fr.acinq.eclair._
 import fr.acinq.eclair.wire.NodeAddress
-import immortan.crypto.Tools._
+import immortan.crypto.Tools
+import immortan.crypto.Tools.Any2Some
 import immortan.utils.ImplicitJsonFormats._
 import immortan.utils.uri.Uri
 import immortan.{LNParams, PaymentAction, RemoteNodeInfo}
@@ -26,7 +26,7 @@ object LNUrl {
   }
 
   def fromBech32(bech32url: String): LNUrl = {
-    val Tuple2(_, dataBody) = Bech32.decode(bech32url)
+    val Tuple3(_, dataBody, _) = Bech32.decode(bech32url)
     val request = new String(Bech32.five2eight(dataBody), "UTF-8")
     LNUrl(request)
   }
@@ -48,12 +48,8 @@ object LNUrl {
     raw
   }
 
-  def noRedirectGuardedGet(url: String): String =
-    guardResponse(HttpRequest.get(url, false).connectTimeout(15000)
-      .followRedirects(false).header("Connection", "close").body)
-
   def level2DataResponse(bld: Uri.Builder): Observable[String] = Rx.ioQueue.map { _ =>
-    noRedirectGuardedGet(bld.build.toString)
+    guardResponse(LNParams.connectionProvider.get(bld.build.toString).string)
   }
 }
 
@@ -71,12 +67,12 @@ case class LNUrl(request: String) {
   lazy val fastWithdrawAttempt: Try[WithdrawRequest] = Try {
     require(uri.getQueryParameter("tag") equals "withdrawRequest")
     WithdrawRequest(uri.getQueryParameter("callback"), uri.getQueryParameter("k1"),
-      uri.getQueryParameter("maxWithdrawable").toLong, uri.getQueryParameter( "defaultDescription"),
+      uri.getQueryParameter("maxWithdrawable").toLong, uri.getQueryParameter("defaultDescription"),
       uri.getQueryParameter("minWithdrawable").toLong.asSome)
   }
 
   def level1DataResponse: Observable[LNUrlData] = Rx.ioQueue.map { _ =>
-    to[LNUrlData](LNUrl noRedirectGuardedGet uri.toString)
+    to[LNUrlData](LNParams.connectionProvider.get(uri.toString).string)
   }
 }
 
@@ -92,10 +88,8 @@ sealed trait CallbackLNUrlData extends LNUrlData {
 // LNURL-CHANNEL
 
 sealed trait HasRemoteInfo {
-
   val remoteInfo: RemoteNodeInfo
-
-  def cancel: Unit = none
+  def cancel: Unit = Tools.none
 }
 
 case class HasRemoteInfoWrap(remoteInfo: RemoteNodeInfo) extends HasRemoteInfo
@@ -103,14 +97,14 @@ case class HasRemoteInfoWrap(remoteInfo: RemoteNodeInfo) extends HasRemoteInfo
 case class NormalChannelRequest(uri: String, callback: String, k1: String) extends CallbackLNUrlData with HasRemoteInfo {
 
   def requestChannel: Observable[String] = LNUrl.level2DataResponse {
-    callbackUri.buildUpon.appendQueryParameter("remoteid", remoteInfo.nodeSpecificPubKey.toString)
-      .appendQueryParameter("k1", k1).appendQueryParameter("private", "1")
+    callbackUri.buildUpon.appendQueryParameter("k1", k1).appendQueryParameter("private", "1")
+      .appendQueryParameter("remoteid", remoteInfo.nodeSpecificPubKey.toString)
   }
 
   override def cancel: Unit = LNUrl.level2DataResponse {
-    callbackUri.buildUpon.appendQueryParameter("remoteid", remoteInfo.nodeSpecificPubKey.toString)
-      .appendQueryParameter("k1", k1).appendQueryParameter("cancel", "1")
-  }.foreach(none, none)
+    callbackUri.buildUpon.appendQueryParameter("k1", k1).appendQueryParameter("cancel", "1")
+      .appendQueryParameter("remoteid", remoteInfo.nodeSpecificPubKey.toString)
+  }.foreach(Tools.none, Tools.none)
 
   val InputParser.nodeLink(nodeKey, hostAddress, portNumber) = uri
 
@@ -150,7 +144,7 @@ case class WithdrawRequest(callback: String, k1: String, maxWithdrawable: Long, 
 
   val relatedPayLinkOpt: Option[LNUrl] = payLink.map(LNUrl.apply)
 
-  val descriptionOpt: Option[String] = Some(defaultDescription).map(trimmed).filter(_.nonEmpty)
+  val descriptionOpt: Option[String] = Some(defaultDescription).map(Tools.trimmed).filter(_.nonEmpty)
 
   require(minCanReceive <= maxWithdrawable.msat, s"$maxWithdrawable is less than min $minCanReceive")
 }
@@ -185,7 +179,7 @@ case class PayRequestMeta(records: PayRequest.TagAndContent) {
 
   val identities: Vector[String] = records.collect { case JsArray(JsString("text/identifier") +: JsString(identifier) +: _) => identifier }
 
-  val textPlain: String = trimmed(texts.head)
+  val textPlain: String = Tools.trimmed(texts.head)
 
   val imageBase64s: Seq[String] = for {
     JsArray(JsString("image/png;base64" | "image/jpeg;base64") +: JsString(image) +: _) <- records
@@ -215,7 +209,7 @@ case class PayRequest(callback: String, maxSendable: Long, minSendable: Long, me
 
 case class PayRequestFinal(successAction: Option[PaymentAction], disposable: Option[Boolean], pr: String) extends LNUrlData {
 
-  lazy val prExt: PaymentRequestExt = PaymentRequestExt.fromRaw(pr)
+  lazy val prExt: PaymentRequestExt = PaymentRequestExt.fromUri(pr)
 
   val isThrowAway: Boolean = disposable.getOrElse(true)
 }

@@ -14,38 +14,34 @@ import scodec.bits.ByteVector
 
 
 class SQLiteNetwork(val db: DBInterface, val updateTable: ChannelUpdateTable, val announceTable: ChannelAnnouncementTable, val excludedTable: ExcludedChannelTable) extends NetworkBag {
-  def addChannelAnnouncement(ca: ChannelAnnouncement, newSqlPQ: PreparedQuery): Unit = db.change(newSqlPQ, Array.emptyByteArray, ca.shortChannelId.toJavaLong, ca.nodeId1.value.toArray, ca.nodeId2.value.toArray)
+  def addChannelAnnouncement(ca: ChannelAnnouncement, newSqlPQ: PreparedQuery): Unit = db.change(newSqlPQ, Array.emptyByteArray, ca.shortChannelId: JLong, ca.nodeId1.value.toArray, ca.nodeId2.value.toArray)
 
-  def addExcludedChannel(shortId: ShortChannelId, untilStamp: Long, newSqlPQ: PreparedQuery): Unit = db.change(newSqlPQ, shortId.toJavaLong, System.currentTimeMillis + untilStamp: JLong)
+  def addExcludedChannel(shortId: Long, untilStamp: Long, newSqlPQ: PreparedQuery): Unit = db.change(newSqlPQ, shortId: JLong, System.currentTimeMillis + untilStamp: JLong)
 
   def listExcludedChannels: Set[Long] = db.select(excludedTable.selectSql, System.currentTimeMillis.toString).set(_ long excludedTable.shortChannelId)
 
-  def listChannelsWithOneUpdate: ShortChanIdSet = db.select(updateTable.selectHavingOneUpdate).set(_ long updateTable.sid).map(ShortChannelId.apply)
+  def listChannelsWithOneUpdate: ShortChanIdSet = db.select(updateTable.selectHavingOneUpdate).set(_ long updateTable.sid)
 
-  def incrementScore(cu: ChannelUpdateExt): Unit = db.change(updateTable.updScoreSql, cu.update.shortChannelId.toJavaLong)
+  def incrementScore(cu: ChannelUpdateExt): Unit = db.change(updateTable.updScoreSql, cu.update.shortChannelId: JLong)
 
-  def removeChannelUpdate(shortId: ShortChannelId, killSqlPQ: PreparedQuery): Unit = db.change(killSqlPQ, shortId.toJavaLong)
+  def removeChannelUpdate(shortId: Long, killSqlPQ: PreparedQuery): Unit = db.change(killSqlPQ, shortId: JLong)
 
   def addChannelUpdateByPosition(cu: ChannelUpdate, newSqlPQ: PreparedQuery, updSqlPQ: PreparedQuery): Unit = {
     val feeProportionalMillionths: JLong = cu.feeProportionalMillionths
+    val cltvExpiryDelta: JInt = cu.cltvExpiryDelta.underlying
     val htlcMinimumMsat: JLong = cu.htlcMinimumMsat.toLong
     val htlcMaxMsat: JLong = cu.htlcMaximumMsat.get.toLong
-    val cltvExpiryDelta: JInt = cu.cltvExpiryDelta.toInt
     val messageFlags: JInt = cu.messageFlags.toInt
     val channelFlags: JInt = cu.channelFlags.toInt
     val feeBaseMsat: JLong = cu.feeBaseMsat.toLong
     val timestamp: JLong = cu.timestamp
 
     val crc32: JLong = Sync.getChecksum(cu)
-
-    db.change(newSqlPQ, cu.shortChannelId.toJavaLong, timestamp, messageFlags, channelFlags, cltvExpiryDelta,
-      htlcMinimumMsat, feeBaseMsat, feeProportionalMillionths, htlcMaxMsat, cu.position, 1L: JLong, crc32)
-
-    db.change(updSqlPQ, timestamp, messageFlags, channelFlags, cltvExpiryDelta, htlcMinimumMsat,
-      feeBaseMsat, feeProportionalMillionths, htlcMaxMsat, crc32, cu.shortChannelId.toJavaLong, cu.position)
+    db.change(newSqlPQ, cu.shortChannelId: JLong, timestamp, messageFlags, channelFlags, cltvExpiryDelta, htlcMinimumMsat, feeBaseMsat, feeProportionalMillionths, htlcMaxMsat, cu.position, 1L: JLong, crc32)
+    db.change(updSqlPQ, timestamp, messageFlags, channelFlags, cltvExpiryDelta, htlcMinimumMsat, feeBaseMsat, feeProportionalMillionths, htlcMaxMsat, crc32, cu.shortChannelId: JLong, cu.position)
   }
 
-  def removeChannelUpdate(shortId: ShortChannelId): Unit = {
+  def removeChannelUpdate(shortId: Long): Unit = {
     val removeChannelUpdateNewSqlPQ = db.makePreparedQuery(updateTable.killSql)
     removeChannelUpdate(shortId, removeChannelUpdateNewSqlPQ)
     removeChannelUpdateNewSqlPQ.close
@@ -61,29 +57,20 @@ class SQLiteNetwork(val db: DBInterface, val updateTable: ChannelUpdateTable, va
 
   def listChannelAnnouncements: Iterable[ChannelAnnouncement] = db.select(announceTable.selectAllSql).iterable { rc =>
     ChannelAnnouncement(nodeSignature1 = ByteVector64.Zeroes, nodeSignature2 = ByteVector64.Zeroes, bitcoinSignature1 = ByteVector64.Zeroes,
-      bitcoinSignature2 = ByteVector64.Zeroes, features = Features.empty, chainHash = LNParams.chainHash, shortChannelId = ShortChannelId(rc long announceTable.shortChannelId),
+      bitcoinSignature2 = ByteVector64.Zeroes, features = Features.empty, chainHash = LNParams.chainHash, shortChannelId = rc long announceTable.shortChannelId,
       nodeId1 = PublicKey(rc byteVec announceTable.nodeId1), nodeId2 = PublicKey(rc byteVec announceTable.nodeId2), bitcoinKey1 = invalidPubKey, bitcoinKey2 = invalidPubKey)
   }
 
   def listChannelUpdates: Iterable[ChannelUpdateExt] =
     db.select(updateTable.selectAllSql).iterable { rc =>
-      val cltvExpiryDelta = CltvExpiryDelta(rc int updateTable.cltvExpiryDelta)
-      val htlcMinimumMsat = MilliSatoshi(rc long updateTable.minMsat)
-      val htlcMaximumMsat = MilliSatoshi(rc long updateTable.maxMsat)
-      val shortChannelId = ShortChannelId(rc long updateTable.sid)
-      val feeBaseMsat = MilliSatoshi(rc long updateTable.base)
-      val channelFlags = rc int updateTable.chanFlags
-      val messageFlags = rc int updateTable.msgFlags
-
-      val update = ChannelUpdate(signature = ByteVector64.Zeroes, chainHash = LNParams.chainHash, shortChannelId,
-        timestamp = rc long updateTable.timestamp, messageFlags.toByte, channelFlags.toByte, cltvExpiryDelta,
-        htlcMinimumMsat, feeBaseMsat, feeProportionalMillionths = rc long updateTable.proportional,
-        htlcMaximumMsat = Some(htlcMaximumMsat), unknownFields = ByteVector.empty)
-
-      ChannelUpdateExt(update, rc long updateTable.crc32, rc long updateTable.score, updateTable.useHeuristics)
+      val htlcMaximumMsat: MilliSatoshi = MilliSatoshi(rc long 9)
+      ChannelUpdateExt(ChannelUpdate(signature = ByteVector64.Zeroes, chainHash = LNParams.chainHash, shortChannelId = rc long 1, timestamp = rc long 2,
+        messageFlags = (rc int 3).toByte, channelFlags = (rc int 4).toByte, cltvExpiryDelta = CltvExpiryDelta(rc int 5), htlcMinimumMsat = MilliSatoshi(rc long 6),
+        feeBaseMsat = MilliSatoshi(rc long 7), feeProportionalMillionths = rc long 8, htlcMaximumMsat = Some(htlcMaximumMsat), unknownFields = ByteVector.empty),
+        crc32 = rc long 12, score = rc long 11, updateTable.useHeuristics)
     }
 
-  def getRoutingData: Map[ShortChannelId, PublicChannel] = {
+  def getRoutingData: Map[Long, PublicChannel] = {
     val shortId2Updates = listChannelUpdates.groupBy(_.update.shortChannelId)
 
     val tuples = listChannelAnnouncements.flatMap { ann =>
@@ -121,7 +108,7 @@ class SQLiteNetwork(val db: DBInterface, val updateTable: ChannelUpdateTable, va
 
     for (announce <- pure.announces) addChannelAnnouncement(announce, addChannelAnnouncementNewSqlPQ)
     for (update <- pure.updates) addChannelUpdateByPosition(update, addChannelUpdateByPositionNewSqlPQ, addChannelUpdateByPositionUpdSqlPQ)
-    for (core <- pure.excluded) addExcludedChannel(core.shortChannelId, 1000L * 3600 * 24 * 300, addExcludedChannelNewSqlPQ)
+    for (core <- pure.excluded) addExcludedChannel(core.shortChannelId, 1000L * 3600 * 24 * 3650, addExcludedChannelNewSqlPQ)
 
     addChannelAnnouncementNewSqlPQ.close
     addChannelUpdateByPositionNewSqlPQ.close
@@ -132,8 +119,7 @@ class SQLiteNetwork(val db: DBInterface, val updateTable: ChannelUpdateTable, va
   def processCompleteHostedData(pure: CompleteHostedRoutingData): Unit = db txWrap {
     // Unlike normal channels here we allow one-sided-update channels to be used for now
     // First, clear out everything in hosted channel databases
-    db.change(announceTable.killAllSql)
-    db.change(updateTable.killAllSql)
+    clearDataTables
 
     val addChannelAnnouncementNewSqlPQ = db.makePreparedQuery(announceTable.newSql)
     val addChannelUpdateByPositionNewSqlPQ = db.makePreparedQuery(updateTable.newSql)
@@ -149,5 +135,10 @@ class SQLiteNetwork(val db: DBInterface, val updateTable: ChannelUpdateTable, va
 
     // And finally remove announces without any updates
     db.change(announceTable.killNotPresentInChans)
+  }
+
+  def clearDataTables: Unit = {
+    db.change(announceTable.killAllSql)
+    db.change(updateTable.killAllSql)
   }
 }

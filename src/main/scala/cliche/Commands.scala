@@ -6,7 +6,7 @@ import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, randomBytes32}
 import fr.acinq.eclair.wire.NodeAddress
-import fr.acinq.eclair.payment.{PaymentRequest}
+import fr.acinq.eclair.payment.{Bolt11Invoice}
 import immortan.fsm.{HCOpenHandler, SendMultiPart}
 import immortan.{
   ChannelHosted,
@@ -82,11 +82,8 @@ object Commands {
   }
 
   def requestHostedChannel(params: RequestHostedChannel): Unit = {
-    val localParams = LNParams.makeChannelParams(
-      LNParams.chainWallets,
-      isFunder = false,
-      LNParams.minChanDustLimit
-    )
+    val localParams =
+      LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
     ByteVector.fromHex(params.pubkey) match {
       case None => {}
@@ -143,13 +140,13 @@ object Commands {
     val msatoshi = params.msatoshi.map(MilliSatoshi(_))
     val descriptionTag =
       params.description
-        .map(PaymentRequest.Description(_))
+        .map(Bolt11Invoice.Description(_))
         .getOrElse(
           params.description_hash
             .flatMap(ByteVector.fromHex(_))
             .map(new ByteVector32(_))
-            .map(PaymentRequest.DescriptionHash(_))
-            .getOrElse(PaymentRequest.Description(""))
+            .map(Bolt11Invoice.DescriptionHash(_))
+            .getOrElse(Bolt11Invoice.Description(""))
         )
 
     // get our route hints
@@ -169,24 +166,28 @@ object Commands {
     val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
 
     // build invoice
-    val pr = new PaymentRequest(
-      PaymentRequest.prefixes(LNParams.chainHash),
+    val pr = new Bolt11Invoice(
+      Bolt11Invoice.prefixes(LNParams.chainHash),
       msatoshi,
       System.currentTimeMillis / 1000L,
       privateKey.publicKey, {
         val defaultTags = List(
-          Some(PaymentRequest.PaymentHash(sha256(preimage))),
+          Some(Bolt11Invoice.PaymentHash(sha256(preimage))),
           Some(descriptionTag),
-          Some(PaymentRequest.PaymentSecret(secret)),
-          Some(PaymentRequest.Expiry(3600 * 24 * 2 /* 2 days */ )),
+          Some(Bolt11Invoice.PaymentSecret(secret)),
+          Some(Bolt11Invoice.Expiry(3600 * 24 * 2 /* 2 days */ )),
           Some(
-            PaymentRequest.MinFinalCltvExpiry(
-              LNParams.incomingFinalCltvExpiry.toInt
+            Bolt11Invoice.MinFinalCltvExpiry(
+              LNParams.incomingFinalCltvExpiry.underlying
             )
           ),
-          Some(PaymentRequest.basicFeatures)
+          Some(
+            Bolt11Invoice.InvoiceFeatures(
+              Bolt11Invoice.defaultFeatures.unscoped
+            )
+          )
         ).flatten
-        defaultTags ++ hops.map(PaymentRequest.RoutingInfo)
+        defaultTags ++ hops.map(Bolt11Invoice.RoutingInfo)
       },
       ByteVector.empty
     ).sign(privateKey)
@@ -212,22 +213,22 @@ object Commands {
   def payInvoice(params: PayInvoice): Unit = {
     Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
       case None => println("invalid invoice")
-      case Some(prExt) if prExt.pr.amount.isEmpty && params.msatoshi.isEmpty =>
+      case Some(prExt)
+          if prExt.pr.amountOpt.isEmpty && params.msatoshi.isEmpty =>
         println("missing amount")
       case Some(prExt) => {
         val amount =
           params.msatoshi
             .map(MilliSatoshi(_))
-            .orElse(prExt.pr.amount)
+            .orElse(prExt.pr.amountOpt)
             .getOrElse(MilliSatoshi(0L))
 
         val cmd = LNParams.cm
           .makeSendCmd(
             prExt,
-            amount,
             LNParams.cm.all.values.toList,
             MilliSatoshi(2000L),
-            true
+            amount
           )
           .modify(_.split.totalSum)
           .setTo(amount)
@@ -252,55 +253,5 @@ object Commands {
         println("sent!")
       }
     }
-  }
-
-  def sendPayment(msg: String): Unit = {
-    var invoiceStr: String = msg.split(" ").last
-    val prOpt: Option[PaymentRequestExt] = Try(
-      PaymentRequestExt.fromUri(invoiceStr)
-    ).toOption // Will throw if invoice is invalid
-    if (prOpt.isEmpty) {
-      println("Incorrect invoice")
-      return
-    }
-    val prExt = prOpt.get
-
-    println("Valid invoice received. Sending...")
-    val amount: MilliSatoshi =
-      prExt.pr.amount.get // Will throw if invoice has no amount
-
-    // val feeReserve: MilliSatoshi = LNParams.cm.feeReserve(amount, typicalChainFee = MilliSatoshi(0L), capLNFeeToChain = false, LNParams.maxOffChainFeeAboveRatio)
-
-    val cmd: SendMultiPart = LNParams.cm
-      .makeSendCmd(
-        prExt,
-        amount,
-        LNParams.cm.all.values.toList,
-        MilliSatoshi(0L),
-        false
-      )
-      .modify(_.split.totalSum)
-      .setTo(amount)
-
-    val pd = PaymentDescription(
-      split = None,
-      label = None,
-      semanticOrder = None,
-      invoiceText = prExt.descriptionOpt getOrElse new String
-    )
-
-    LNParams.cm.payBag.replaceOutgoingPayment(
-      prExt,
-      pd,
-      action = None,
-      amount,
-      MilliSatoshi(0L),
-      LNParams.fiatRates.info.rates,
-      MilliSatoshi(0L),
-      System.currentTimeMillis
-    )
-
-    LNParams.cm.localSend(cmd)
-    println("Sent")
   }
 }

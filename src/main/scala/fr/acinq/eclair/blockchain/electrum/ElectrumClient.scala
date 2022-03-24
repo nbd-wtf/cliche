@@ -1,29 +1,14 @@
-/*
- * Copyright 2019 ACINQ SAS
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package fr.acinq.eclair.blockchain.electrum
 
 import java.net.{InetSocketAddress, SocketAddress}
 import java.util
 
-import akka.actor.{Actor, ActorLogging, ActorRef, Cancellable, Stash, Terminated}
+import akka.actor.{Actor, ActorRef, Cancellable, Stash, Terminated}
 import fr.acinq.bitcoin._
 import fr.acinq.eclair.blockchain.bitcoind.rpc.{Error, JsonRPCRequest, JsonRPCResponse}
-import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
+import fr.acinq.eclair.blockchain.electrum.ElectrumClient._
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
+import immortan.LNParams
 import io.netty.bootstrap.Bootstrap
 import io.netty.buffer.PooledByteBufAllocator
 import io.netty.channel._
@@ -32,12 +17,14 @@ import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
 import io.netty.handler.codec.string.{LineEncoder, StringDecoder}
 import io.netty.handler.codec.{LineBasedFrameDecoder, MessageToMessageDecoder, MessageToMessageEncoder}
+import io.netty.handler.proxy.Socks5ProxyHandler
 import io.netty.handler.ssl.SslContextBuilder
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory
+import io.netty.resolver.NoopAddressResolverGroup
 import io.netty.util.CharsetUtil
 import org.json4s.JsonAST._
 import org.json4s.native.JsonMethods
-import org.json4s.{DefaultFormats, Formats, JInt, JLong, JString}
+import org.json4s.{JInt, JLong, JString}
 import scodec.bits.ByteVector
 
 import scala.annotation.tailrec
@@ -46,118 +33,75 @@ import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
 
-class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec: ExecutionContext) extends Actor with Stash with ActorLogging {
-
-  import ElectrumClient._
-
-  implicit val formats = DefaultFormats
+class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec: ExecutionContext) extends Actor with Stash {
 
   val b = new Bootstrap
-  b.group(workerGroup)
-  b.channel(classOf[NioSocketChannel])
-  b.option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
+  b channel classOf[NioSocketChannel]
+  b group workerGroup
+
   b.option[java.lang.Boolean](ChannelOption.TCP_NODELAY, true)
+  b.option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
   b.option[java.lang.Integer](ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
   b.option(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
-  b.handler(new ChannelInitializer[SocketChannel]() {
+
+  b handler new ChannelInitializer[SocketChannel] {
     override def initChannel(ch: SocketChannel): Unit = {
-      ssl match {
-        case SSL.OFF => ()
-        case SSL.STRICT =>
-          val sslCtx = SslContextBuilder.forClient.build
-          val handler = sslCtx.newHandler(ch.alloc(), serverAddress.getHostName, serverAddress.getPort)
-          val sslParameters = handler.engine().getSSLParameters
-          sslParameters.setEndpointIdentificationAlgorithm("HTTPS")
-          handler.engine().setSSLParameters(sslParameters)
-          val enabledProtocols = if (handler.engine().getSupportedProtocols.contains("TLSv1.3")) {
-            "TLSv1.2" :: "TLSv1.3" :: Nil
-          } else {
-            "TLSv1.2" :: Nil
-          }
-          handler.engine().setEnabledProtocols(enabledProtocols.toArray)
-          ch.pipeline.addLast(handler)
-        case SSL.LOOSE =>
-          // INSECURE VERSION THAT DOESN'T CHECK CERTIFICATE
-          val sslCtx = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build()
-          ch.pipeline.addLast(sslCtx.newHandler(ch.alloc(), serverAddress.getHostName, serverAddress.getPort))
+      if (ssl == SSL.LOOSE || serverAddress.getPort == 50002) {
+        val sslCtx = SslContextBuilder.forClient.trustManager(InsecureTrustManagerFactory.INSTANCE).build
+        ch.pipeline addLast sslCtx.newHandler(ch.alloc, serverAddress.getHostName, serverAddress.getPort)
       }
-      // inbound handlers
-      ch.pipeline.addLast(new LineBasedFrameDecoder(Int.MaxValue, true, true)) // JSON messages are separated by a new line
-      ch.pipeline.addLast(new StringDecoder(CharsetUtil.UTF_8))
-      ch.pipeline.addLast(new ElectrumResponseDecoder)
-      ch.pipeline.addLast(new ActorHandler(self))
-      // outbound handlers
+
+      // Inbound
+      ch.pipeline addLast new LineBasedFrameDecoder(Int.MaxValue, true, true)
+      ch.pipeline addLast new StringDecoder(CharsetUtil.UTF_8)
+      ch.pipeline addLast new ElectrumResponseDecoder
+      ch.pipeline addLast new ActorHandler(self)
+
+      // Outbound
       ch.pipeline.addLast(new LineEncoder)
       ch.pipeline.addLast(new JsonRPCRequestEncoder)
-      // error handler
-      ch.pipeline.addLast(new ExceptionHandler)
-    }
-  })
 
-  // Start the client.
-  log.debug("connecting to server={}", serverAddress)
+      // Error handler
+      ch.pipeline.addLast(new ExceptionHandler)
+
+      LNParams.connectionProvider.proxyAddress.foreach { address =>
+        // Optional proxy which must be the first handler
+        val handler = new Socks5ProxyHandler(address)
+        ch.pipeline.addFirst(handler)
+      }
+    }
+  }
 
   val channelOpenFuture: ChannelFuture = b.connect(serverAddress.getHostName, serverAddress.getPort)
 
-  def errorHandler(t: Throwable): Unit = {
-    // generic errors don't need to be logged in most cases, what we actually want are errors that happened once we were
-    // properly connected and had exchanged version messages
-    log.debug("server={} connection error (reason={})", serverAddress, t.getMessage)
-    self ! Close
-  }
+  if (LNParams.connectionProvider.proxyAddress.isDefined) b.resolver(NoopAddressResolverGroup.INSTANCE)
 
-  channelOpenFuture.addListeners(new ChannelFutureListener {
+  channelOpenFuture addListeners new ChannelFutureListener {
     override def operationComplete(future: ChannelFuture): Unit = {
       if (!future.isSuccess) {
-        errorHandler(future.cause())
+        self ! Close
       } else {
-        future.channel().closeFuture().addListener(new ChannelFutureListener {
-          override def operationComplete(future: ChannelFuture): Unit = {
-            if (!future.isSuccess) {
-              errorHandler(future.cause())
-            } else {
-              log.debug("server={} channel closed: {}", serverAddress, future.channel())
-              self ! Close
-            }
-          }
-        })
+        future.channel.closeFuture addListener new ChannelFutureListener {
+          override def operationComplete(future: ChannelFuture): Unit = self ! Close
+        }
       }
     }
-  })
+  }
 
-  /**
-    * This error handler catches all exceptions and kill the actor
-    * See https://stackoverflow.com/questions/30994095/how-to-catch-all-exception-in-netty
-    */
   class ExceptionHandler extends ChannelDuplexHandler {
     override def connect(ctx: ChannelHandlerContext, remoteAddress: SocketAddress, localAddress: SocketAddress, promise: ChannelPromise): Unit = {
-      ctx.connect(remoteAddress, localAddress, promise.addListener(new ChannelFutureListener() {
-        override def operationComplete(future: ChannelFuture): Unit = {
-          if (!future.isSuccess) {
-            errorHandler(future.cause())
-          }
-        }
-      }))
+      val listener = new ChannelFutureListener { override def operationComplete(future: ChannelFuture): Unit = if (!future.isSuccess) self ! Close }
+      ctx.connect(remoteAddress, localAddress, promise addListener listener)
     }
 
     override def write(ctx: ChannelHandlerContext, msg: scala.Any, promise: ChannelPromise): Unit = {
-      ctx.write(msg, promise.addListener(new ChannelFutureListener() {
-        override def operationComplete(future: ChannelFuture): Unit = {
-          if (!future.isSuccess) {
-            errorHandler(future.cause())
-          }
-        }
-      }))
+      val listener = new ChannelFutureListener { override def operationComplete(future: ChannelFuture): Unit = if (!future.isSuccess) self ! Close }
+      ctx.write(msg, promise addListener listener)
     }
 
-    override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
-      errorHandler(cause)
-    }
+    override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = self ! Close
   }
 
-  /**
-    * A decoder ByteBuf -> Either[Response, JsonRPCResponse]
-    */
   class ElectrumResponseDecoder extends MessageToMessageDecoder[String] {
     override def decode(ctx: ChannelHandlerContext, msg: String, out: util.List[AnyRef]): Unit = {
       val s = msg.asInstanceOf[String]
@@ -166,15 +110,11 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
     }
   }
 
-  /**
-    * An encoder JsonRPCRequest -> ByteBuf
-    */
   class JsonRPCRequestEncoder extends MessageToMessageEncoder[JsonRPCRequest] {
     override def encode(ctx: ChannelHandlerContext, request: JsonRPCRequest, out: util.List[AnyRef]): Unit = {
       import org.json4s.JsonDSL._
       import org.json4s._
 
-      log.debug("sending {} to {}", request, serverAddress)
       val json = ("method" -> request.method) ~ ("params" -> request.params.map {
         case s: String => new JString(s)
         case b: ByteVector32 => new JString(b.toHex)
@@ -189,29 +129,20 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
     }
   }
 
-  /**
-    * Forwards incoming messages to the underlying actor
-    */
   class ActorHandler(actor: ActorRef) extends ChannelInboundHandlerAdapter {
-
-    override def channelActive(ctx: ChannelHandlerContext): Unit = {
-      actor ! ctx
-    }
-
-    override def channelRead(ctx: ChannelHandlerContext, msg: Any): Unit = {
-      actor ! msg
-    }
+    override def channelActive(ctx: ChannelHandlerContext): Unit = actor ! ctx
+    override def channelRead(ctx: ChannelHandlerContext, msg: Any): Unit = actor ! msg
   }
 
-  var addressSubscriptions = Map.empty[String, Set[ActorRef]]
-  var scriptHashSubscriptions = Map.empty[ByteVector32, Set[ActorRef]]
+  type ActorSet = Set[ActorRef]
+  var addressSubscriptions = Map.empty[String, ActorSet]
+  var scriptHashSubscriptions = Map.empty[ByteVector32, ActorSet]
   val headerSubscriptions = collection.mutable.HashSet.empty[ActorRef]
-  val version = ServerVersion(CLIENT_NAME, PROTOCOL_VERSION)
   val statusListeners = collection.mutable.HashSet.empty[ActorRef]
-
+  val version = ServerVersion(CLIENT_NAME, PROTOCOL_VERSION)
   var reqId = 0
 
-  // we need to regularly send a ping in order not to get disconnected
+  // We need to regularly send a ping in order not to get disconnected
   val pingTrigger: Cancellable = context.system.scheduler.schedule(30.seconds, 30.seconds, self, Ping)
 
   override def unhandled(message: Any): Unit = {
@@ -230,29 +161,21 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
         statusListeners.foreach(_ ! ElectrumDisconnected)
         context.stop(self)
 
-      case _ => log.warning("server={} unhandled message {}", serverAddress, message)
+      case _ =>
+        // Do nothing
     }
   }
 
-  override def postStop(): Unit = {
-    pingTrigger.cancel()
-    super.postStop()
+  override def postStop: Unit = {
+    pingTrigger.cancel
+    super.postStop
   }
 
-  /**
-    * send an electrum request to the server
-    *
-    * @param ctx     connection to the electrumx server
-    * @param request electrum request
-    * @return the request id used to send the request
-    */
   def send(ctx: ChannelHandlerContext, request: Request): String = {
-    val electrumRequestId = "" + reqId
-    if (ctx.channel().isWritable) {
-      ctx.channel().writeAndFlush(makeRequest(request, electrumRequestId))
-    } else {
-      errorHandler(new RuntimeException(s"channel not writable"))
-    }
+    val electrumRequestId = reqId.toString
+
+    if (ctx.channel.isWritable) ctx.channel writeAndFlush makeRequest(request, electrumRequestId) else self ! Close
+
     reqId = reqId + 1
     electrumRequestId
   }
@@ -261,7 +184,6 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
 
   def disconnected: Receive = {
     case ctx: ChannelHandlerContext =>
-      log.debug("connected to server={}", serverAddress)
       send(ctx, version)
       context become waitingForVersion(ctx)
 
@@ -271,14 +193,11 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
   def waitingForVersion(ctx: ChannelHandlerContext): Receive = {
     case Right(json: JsonRPCResponse) =>
       (parseJsonResponse(version, json): @unchecked) match {
-        case ServerVersionResponse(clientName, protocolVersion) =>
-          log.info("server={} clientName={} protocolVersion={}", serverAddress, clientName, protocolVersion)
+        case _: ServerVersionResponse =>
           send(ctx, HeaderSubscription(self))
           headerSubscriptions += self
-          log.debug("waiting for tip from server={}", serverAddress)
           context become waitingForTip(ctx)
-        case ServerError(request, error) =>
-          log.error("server={} sent error={} while processing request={}, disconnecting", serverAddress, error, request)
+        case _: ServerError =>
           self ! Close
       }
 
@@ -288,9 +207,8 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
   def waitingForTip(ctx: ChannelHandlerContext): Receive = {
     case Right(json: JsonRPCResponse) =>
       val (height, header) = parseBlockHeader(json.result)
-      log.debug("connected to server={}, tip={} height={}", serverAddress, header.hash, height)
       statusListeners.foreach(_ ! ElectrumReady(height, header, serverAddress))
-      context become connected(ctx, height, header, Map())
+      context become connected(ctx, height, header, Map.empty)
 
     case AddStatusListener(actor) => statusListeners += actor
   }
@@ -316,16 +234,14 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
           context watch actor
         case _ => ()
       }
-      context become connected(ctx, height, tip, requests + (curReqId -> ((request, sender()))))
+      context become connected(ctx, height, tip, requests + (curReqId -> (request, sender())))
 
     case Right(json: JsonRPCResponse) =>
       requests.get(json.id) match {
         case Some((request, requestor)) =>
           val response = parseJsonResponse(request, json)
-          log.debug("server={} sent response for reqId={} request={} response={}", serverAddress, json.id, request, response)
           requestor ! response
         case None =>
-          log.warning("server={} could not find requestor for reqId=${} response={}", serverAddress, json.id, json)
       }
       context become connected(ctx, height, tip, requests - json.id)
 
@@ -335,31 +251,19 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit val ec
 
     case Left(response: ScriptHashSubscriptionResponse) => scriptHashSubscriptions.get(response.scriptHash).foreach(listeners => listeners.foreach(_ ! response))
 
-    case HeaderSubscriptionResponse(height, newtip) =>
-      log.info("server={} new tip={}", serverAddress, newtip)
-      context become connected(ctx, height, newtip, requests)
+    case HeaderSubscriptionResponse(height1, newtip) => context become connected(ctx, height1, newtip, requests)
   }
 }
 
-/**
- * See the documentation at https://electrumx-spesmilo.readthedocs.io/en/latest/
- */
 object ElectrumClient {
-  val CLIENT_NAME = "3.3.6" // client name that we will include in our "version" message
-  val PROTOCOL_VERSION = "1.4" // version of the protocol that we require
+  val CLIENT_NAME = "3.3.6"
+  val PROTOCOL_VERSION = "1.4"
 
   // this is expensive and shared with all clients
-  val workerGroup = new NioEventLoopGroup()
+  val workerGroup = new NioEventLoopGroup
 
-  /**
-    * Utility function to converts a publicKeyScript to electrum's scripthash
-    *
-    * @param publicKeyScript public key script
-    * @return the hash of the public key script, as used by ElectrumX's hash-based methods
-    */
   def computeScriptHash(publicKeyScript: ByteVector): ByteVector32 = Crypto.sha256(publicKeyScript).reverse
 
-  // @formatter:off
   case class AddStatusListener(actor: ActorRef)
   case class RemoveStatusListener(actor: ActorRef)
 
@@ -374,25 +278,25 @@ object ElectrumClient {
 
   case class GetAddressHistory(address: String) extends Request
   case class TransactionHistoryItem(height: Int, txHash: ByteVector32)
-  case class GetAddressHistoryResponse(address: String, history: Seq[TransactionHistoryItem]) extends Response
+  case class GetAddressHistoryResponse(address: String, history: Seq[TransactionHistoryItem] = Nil) extends Response
 
   case class GetScriptHashHistory(scriptHash: ByteVector32) extends Request
-  case class GetScriptHashHistoryResponse(scriptHash: ByteVector32, history: List[TransactionHistoryItem]) extends Response
+  case class GetScriptHashHistoryResponse(scriptHash: ByteVector32, history: List[TransactionHistoryItem] = Nil) extends Response
 
   case class AddressListUnspent(address: String) extends Request
   case class UnspentItem(txHash: ByteVector32, txPos: Int, value: Long, height: Long) {
     lazy val outPoint = OutPoint(txHash.reverse, txPos)
   }
-  case class AddressListUnspentResponse(address: String, unspents: Seq[UnspentItem]) extends Response
+  case class AddressListUnspentResponse(address: String, unspents: Seq[UnspentItem] = Nil) extends Response
 
   case class ScriptHashListUnspent(scriptHash: ByteVector32) extends Request
-  case class ScriptHashListUnspentResponse(scriptHash: ByteVector32, unspents: Seq[UnspentItem]) extends Response
+  case class ScriptHashListUnspentResponse(scriptHash: ByteVector32, unspents: Seq[UnspentItem] = Nil) extends Response
 
   case class BroadcastTransaction(tx: Transaction) extends Request
-  case class BroadcastTransactionResponse(tx: Transaction, error: Option[Error]) extends Response
+  case class BroadcastTransactionResponse(tx: Transaction, error: Option[Error] = None) extends Response
 
-  case class GetTransactionIdFromPosition(height: Int, tx_pos: Int, merkle: Boolean = false) extends Request
-  case class GetTransactionIdFromPositionResponse(txid: ByteVector32, height: Int, tx_pos: Int, merkle: Seq[ByteVector32]) extends Response
+  case class GetTransactionIdFromPosition(height: Int, txPos: Int, merkle: Boolean = false) extends Request
+  case class GetTransactionIdFromPositionResponse(txid: ByteVector32, height: Int, txPos: Int, merkle: Seq[ByteVector32] = Nil) extends Response
 
   case class GetTransaction(txid: ByteVector32, override val contextOpt: Option[Any] = None) extends Request
   case class GetTransactionResponse(tx: Transaction, override val contextOpt: Option[Any]) extends Response
@@ -403,10 +307,8 @@ object ElectrumClient {
     def apply(t: (Int, BlockHeader)) = new GetHeaderResponse(t._1, t._2)
   }
 
-  case class GetHeaders(start_height: Int, count: Int, cp_height: Int = 0) extends Request
-  case class GetHeadersResponse(start_height: Int, headers: Seq[BlockHeader], max: Int) extends Response {
-    override def toString = s"GetHeadersResponse($start_height, ${headers.length}, ${headers.headOption}, ${headers.lastOption}, $max)"
-  }
+  case class GetHeaders(startHeight: Int, count: Int, cpHeight: Int = 0) extends Request
+  case class GetHeadersResponse(startHeight: Int, headers: Seq[BlockHeader], max: Int) extends Response
 
   case class GetMerkle(txid: ByteVector32, height: Int, override val contextOpt: Option[Any] = None) extends Request
   case class GetMerkleResponse(txid: ByteVector32, merkle: List[ByteVector32], blockHeight: Int, pos: Int, override val contextOpt: Option[Any] = None) extends Response {
@@ -443,7 +345,8 @@ object ElectrumClient {
   }
 
   object Header {
-    def makeHeader(height: Long, header: BlockHeader) = ElectrumClient.Header(height, header.version, header.hashPreviousBlock.reverse, header.hashMerkleRoot.reverse, header.time, header.bits, header.nonce)
+    def makeHeader(height: Long, header: BlockHeader) = ElectrumClient.Header(height, header.version,
+      header.hashPreviousBlock.reverse, header.hashMerkleRoot.reverse, header.time, header.bits, header.nonce)
 
     val RegtestGenesisHeader: Header = makeHeader(0, Block.RegtestGenesisBlock.header)
     val TestnetGenesisHeader: Header = makeHeader(0, Block.TestnetGenesisBlock.header)
@@ -461,18 +364,15 @@ object ElectrumClient {
   case object ElectrumDisconnected extends ElectrumEvent
 
   sealed trait SSL
+
   object SSL {
-    case object OFF extends SSL
-    case object STRICT extends SSL
+    case object DECIDE extends SSL
     case object LOOSE extends SSL
   }
 
   case object Close
 
-  // @formatter:on
-
   def parseResponse(input: String): Either[Response, JsonRPCResponse] = {
-    implicit val formats = DefaultFormats
     val json = JsonMethods.parse(new String(input))
     json \ "method" match {
       case JString(method) =>
@@ -490,7 +390,6 @@ object ElectrumClient {
   }
 
   def parseJsonRpcResponse(json: JValue): JsonRPCResponse = {
-    implicit val formats = DefaultFormats
     val result = json \ "result"
     val error = json \ "error" match {
       case JNull => None
@@ -551,7 +450,6 @@ object ElectrumClient {
   }
 
   def parseJsonResponse(request: Request, json: JsonRPCResponse): Response = {
-    implicit val formats: Formats = DefaultFormats
     json.error match {
       case Some(error) => (request: @unchecked) match {
         case BroadcastTransaction(tx) => BroadcastTransactionResponse(tx, Some(error)) // for this request type, error are considered a "normal" response

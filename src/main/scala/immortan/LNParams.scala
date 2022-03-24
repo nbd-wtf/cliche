@@ -9,8 +9,6 @@ import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin._
 import fr.acinq.eclair.Features._
 import fr.acinq.eclair._
-import fr.acinq.eclair.blockchain.EclairWallet
-import fr.acinq.eclair.blockchain.electrum.ElectrumWallet.WalletReady
 import fr.acinq.eclair.blockchain.electrum._
 import fr.acinq.eclair.blockchain.electrum.db.{CompleteChainWalletInfo, SigningWallet, WatchingWallet}
 import fr.acinq.eclair.channel.{ChannelKeys, LocalParams, PersistentChannelData}
@@ -38,9 +36,9 @@ object LNParams {
   val cltvRejectThreshold: Int = hcFulfillSafetyBlocks + 36 // Reject incoming payment right away if CLTV expiry is closer than this to current chain tip when HTLC arrives
   val incomingFinalCltvExpiry: CltvExpiryDelta = CltvExpiryDelta(hcFulfillSafetyBlocks + 72) // Ask payer to set final CLTV expiry to current chain tip + this many blocks
 
-  val failedChanRecoveryMsec: Double = 300000D // Failed-at-amount channels are fully recovered and their original capacity can be tried again after this much time
+  val failedChanRecoveryMsec: Double = 600000D // Failed-at-amount channels are fully recovered and their original capacity can be tried again after this much time
 
-  val maxCltvExpiryDelta: CltvExpiryDelta = CltvExpiryDelta(1008) // A relative expiry per single channel hop can not exceed this much blocks
+  val maxCltvExpiryDelta: CltvExpiryDelta = CltvExpiryDelta(2016) // A relative expiry of the whole route can not exceed this much blocks
   val maxToLocalDelay: CltvExpiryDelta = CltvExpiryDelta(2016) // We ask peer to delay their payment for this long in case of force-close
   val maxFundingSatoshis: Satoshi = Satoshi(10000000000L) // Proposed channels of capacity more than this are not allowed
   val maxReserveToFundingRatio: Double = 0.02 // %
@@ -51,7 +49,7 @@ object LNParams {
   val maxHoldSecs: Long = 600L
 
   val maxOffChainFeeRatio: Double = 0.01 // We are OK with paying up to this % of LN fee relative to payment amount
-  val maxOffChainFeeAboveRatio: MilliSatoshi = MilliSatoshi(20000L) // For small amounts we always accept fee up to this
+  val maxOffChainFeeAboveRatio: MilliSatoshi = MilliSatoshi(10000L) // For small amounts we always accept fee up to this
 
   val shouldSendUpdateFeerateDiff = 5.0
   val shouldRejectPaymentFeerateDiff = 20.0
@@ -72,6 +70,7 @@ object LNParams {
   var secret: WalletSecret = _
   var chainHash: ByteVector32 = _
   var chainWallets: WalletExt = _
+  var connectionProvider: ConnectionProvider = _
   var logBag: SQLiteLog = _
   var cm: ChannelMaster = _
 
@@ -81,17 +80,14 @@ object LNParams {
   var fiatRates: FiatRates = _
   var feeRates: FeeRates = _
 
-  var trampoline =
-    TrampolineOn(minPayment, maximumMsat = 1000000000L.msat, feeBaseMsat = 10000L.msat,
-      feeProportionalMillionths = 1000L, exponent = 0.0, logExponent = 0.0, minRoutingCltvExpiryDelta)
+  var trampoline: TrampolineOn = TrampolineOn(minPayment, Long.MaxValue.msat, feeProportionalMillionths = 1000L, exponent = 0.0, logExponent = 0.0, minRoutingCltvExpiryDelta)
 
-  // Last known chain tip (zero is unknown)
   val blockCount: AtomicLong = new AtomicLong(0L)
 
   def isOperational: Boolean =
-    null != chainHash && null != secret && null != chainWallets && null != syncParams && null != trampoline &&
-      null != fiatRates && null != feeRates && null != cm && null != cm.inProcessors && null != cm.sendTo &&
-      null != logBag && null != routerConf && null != ourInit
+    null != chainHash && null != secret && null != chainWallets && connectionProvider != null &&
+      null != syncParams && null != trampoline && null != fiatRates && null != feeRates && null != cm &&
+      null != cm.inProcessors && null != cm.sendTo && null != logBag && null != routerConf && null != ourInit
 
   implicit val timeout: Timeout = Timeout(30.seconds)
   implicit val system: ActorSystem = ActorSystem("immortan-actor-system")
@@ -105,11 +101,10 @@ object LNParams {
       (ChannelRangeQueries, FeatureSupport.Optional),
       (ChannelRangeQueriesExtended, FeatureSupport.Optional),
       (BasicMultiPartPayment, FeatureSupport.Optional),
-      (OptionDataLossProtect, FeatureSupport.Optional),
       (VariableLengthOnion, FeatureSupport.Optional),
-      (TrampolineRouting, FeatureSupport.Optional),
       (ShutdownAnySegwit, FeatureSupport.Optional),
       (StaticRemoteKey, FeatureSupport.Optional),
+      (DataLossProtect, FeatureSupport.Optional),
       (HostedChannels, FeatureSupport.Optional),
       (PaymentSecret, FeatureSupport.Optional),
       (ChainSwap, FeatureSupport.Optional),
@@ -117,10 +112,10 @@ object LNParams {
     ), tlvStream)
   }
 
-  // We make sure force-close pays directly to wallet
-  def makeChannelParams(chainWallet: WalletExt, isFunder: Boolean, fundingAmount: Satoshi): LocalParams = {
-    val walletKey = Await.result(chainWallet.lnWallet.getReceiveAddresses, atMost = 40.seconds).accountToKey.values.head
-    makeChannelParams(Script.write(Script.pay2wpkh(walletKey.publicKey).toList), walletKey.publicKey, isFunder, fundingAmount)
+  // We make sure force-close pays directly to our local wallet always
+  def makeChannelParams(isFunder: Boolean, fundingAmount: Satoshi): LocalParams = {
+    val walletPubKey = Await.result(chainWallets.lnWallet.getReceiveAddresses, atMost = 40.seconds).keys.head.publicKey
+    makeChannelParams(Script.write(Script.pay2wpkh(walletPubKey).toList), walletPubKey, isFunder, fundingAmount)
   }
 
   // We make sure that funder and fundee key path end differently
@@ -134,67 +129,58 @@ object LNParams {
 
   def currentBlockDay: Long = blockCount.get / blocksPerDay
 
-  def isPeerSupports(theirInit: Init)(feature: Feature): Boolean = Features.canUseFeature(ourInit.features, theirInit.features, feature)
+  def isPeerSupports(theirInit: Init)(feature: Feature with InitFeature): Boolean = Features.canUseFeature(ourInit.features, theirInit.features, feature)
 
   def loggedActor(childProps: Props, childName: String): ActorRef = system actorOf Props(classOf[LoggingSupervisor], childProps, childName)
 
   def addressToPubKeyScript(address: String): ByteVector = Script write addressToPublicKeyScript(address, chainHash)
-
-  def updateChainWallet(walletExt: WalletExt): Unit = synchronized(chainWallets = walletExt)
 
   def isMainnet: Boolean = chainHash == Block.LivenetGenesisBlock.hash
 }
 
 case class WalletExt(wallets: List[ElectrumEclairWallet], catcher: ActorRef, sync: ActorRef, pool: ActorRef, watcher: ActorRef, params: WalletParameters) extends CanBeShutDown { me =>
 
-  def withBalanceUpdated(event: WalletReady): WalletExt = me.modify(_.wallets.eachWhere(_.ewt.xPub == event.xPub).info.lastBalance).setTo(event.balance)
+  lazy val lnWallet: ElectrumEclairWallet = wallets.find(_.isBuiltIn).get
+
+  lazy val usableWallets: List[ElectrumEclairWallet] = wallets.filter(wallet => wallet.isBuiltIn || wallet.hasFingerprint)
 
   def findByPubKey(pub: PublicKey): Option[ElectrumEclairWallet] = wallets.find(_.ewt.xPub.publicKey == pub)
 
-  def findByTag(tag: String): Option[ElectrumEclairWallet] = wallets.find(_.info.core.walletType == tag)
-
-  def + (wallet: ElectrumEclairWallet): WalletExt = copy(wallets = wallet :: wallets)
-
-  def mostFundedWallet: ElectrumEclairWallet = wallets.maxBy(_.info.lastBalance)
-
-  lazy val lnWallet: ElectrumEclairWallet = findByTag(EclairWallet.BIP84).filter(_.ewt.secrets.isDefined).get
-
   def makeSigningWalletParts(core: SigningWallet, lastBalance: Satoshi, label: String): ElectrumEclairWallet = {
-    val ewt = ElectrumWalletType.makeSigningType(tag = core.walletType, LNParams.secret.keys.master, LNParams.chainHash)
+    val ewt = ElectrumWalletType.makeSigningType(tag = core.walletType, master = LNParams.secret.keys.master, chainHash = LNParams.chainHash)
     val walletRef = LNParams.loggedActor(Props(classOf[ElectrumWallet], pool, sync, params, ewt), core.walletType + "-signing-wallet")
-    val infoNoPersistent = CompleteChainWalletInfo(core, data = ByteVector.empty, lastBalance, label)
+    val infoNoPersistent = CompleteChainWalletInfo(core, data = ByteVector.empty, lastBalance, label, isCoinControlOn = false)
     ElectrumEclairWallet(walletRef, ewt, infoNoPersistent)
   }
 
-  def withNewSigning(core: SigningWallet, label: String): WalletExt = {
-    val eclairWallet = makeSigningWalletParts(core, lastBalance = Satoshi(0L), label)
-    params.walletDb.addChainWallet(eclairWallet.info, params.emptyPersistentDataBytes, eclairWallet.ewt.xPub.publicKey)
-    eclairWallet.walletRef ! params.emptyPersistentDataBytes
-    sync ! ElectrumWallet.ChainFor(eclairWallet.walletRef)
-    me + eclairWallet
-  }
-
-  def makeWatchingWalletParts(core: WatchingWallet, lastBalance: Satoshi, label: String): ElectrumEclairWallet = {
-    val ewt = ElectrumWalletType.makeWatchingType(tag = core.walletType, xPub = core.xPub, chainHash = LNParams.chainHash)
+  def makeWatchingWallet84Parts(core: WatchingWallet, lastBalance: Satoshi, label: String): ElectrumEclairWallet = {
+    val ewt: ElectrumWallet84 = new ElectrumWallet84(secrets = None, xPub = core.xPub, chainHash = LNParams.chainHash)
     val walletRef = LNParams.loggedActor(Props(classOf[ElectrumWallet], pool, sync, params, ewt), core.walletType + "-watching-wallet")
-    val infoNoPersistent = CompleteChainWalletInfo(core, data = ByteVector.empty, lastBalance, label)
+    val infoNoPersistent = CompleteChainWalletInfo(core, data = ByteVector.empty, lastBalance, label, isCoinControlOn = false)
     ElectrumEclairWallet(walletRef, ewt, infoNoPersistent)
   }
 
-  def withNewWatching(core: WatchingWallet, label: String): WalletExt = {
-    val eclairWallet = makeWatchingWalletParts(core, lastBalance = Satoshi(0L), label)
+  def withFreshWallet(eclairWallet: ElectrumEclairWallet): WalletExt = {
     params.walletDb.addChainWallet(eclairWallet.info, params.emptyPersistentDataBytes, eclairWallet.ewt.xPub.publicKey)
     eclairWallet.walletRef ! params.emptyPersistentDataBytes
     sync ! ElectrumWallet.ChainFor(eclairWallet.walletRef)
-    me + eclairWallet
+    copy(wallets = eclairWallet :: wallets)
   }
 
   def withoutWallet(wallet: ElectrumEclairWallet): WalletExt = {
-    require(wallet.info.core.isRemovable, "Can not remove wallet")
-    params.walletDb.remove(wallet.ewt.xPub.publicKey)
+    require(wallet.info.core.isRemovable, "Wallet is not removable")
+    params.walletDb.remove(pub = wallet.ewt.xPub.publicKey)
+    params.txDb.removeByPub(xPub = wallet.ewt.xPub)
     val wallets1 = wallets diff List(wallet)
     wallet.walletRef ! PoisonPill
     copy(wallets = wallets1)
+  }
+
+  def withNewLabel(label: String)(wallet1: ElectrumEclairWallet): WalletExt = {
+    require(!wallet1.isBuiltIn, "Can not re-label a default built in chain wallet")
+    def sameXPub(wallet: ElectrumEclairWallet): Boolean = wallet.ewt.xPub == wallet1.ewt.xPub
+    params.walletDb.updateLabel(label, pub = wallet1.ewt.xPub.publicKey)
+    me.modify(_.wallets.eachWhere(sameXPub).info.label).setTo(label)
   }
 
   override def becomeShutDown: Unit = {
@@ -207,22 +193,24 @@ case class WalletExt(wallets: List[ElectrumEclairWallet], catcher: ActorRef, syn
 class SyncParams {
   val satm: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"02cd1b7bc418fac2dc99f0ba350d60fa6c45fde5ab6017ee14df6425df485fb1dd"), NodeAddress.unresolved(80, host = 134, 209, 228, 207), "SATM")
   val motherbase: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"021e7ea08e31a576b4fd242761d701452a8ac98113eac3074c153db85d2dcc7d27"), NodeAddress.unresolved(9001, host = 5, 9, 83, 143), "Motherbase")
-  val generalBytes: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03e35a27fa8bfad8675aeb9e96530e7b00e6fa03b571d235f6b4e68cfb4ef9097c"), NodeAddress.unresolved(9736, host = 67, 207, 92, 63), "General Bytes")
+  val bCashIsTrash: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"0298f6074a454a1f5345cb2a7c6f9fce206cd0bf675d177cdbf0ca7508dd28852f"), NodeAddress.unresolved(9735, host = 73, 119, 255, 56), "bCashIsTrash")
+  val ergveinNet: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"034a7b1ac1239ff2ac8438ce0a7ade1048514b77d4322f514e96918e6c13944861"), NodeAddress.unresolved(9735, host = 188, 244, 4, 78), "ergvein.net")
   val conductor: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03c436af41160a355fc1ed230a64f6a64bcbd2ae50f12171d1318f9782602be601"), NodeAddress.unresolved(9735, host = 18, 191, 89, 219), "Conductor")
   val lntxbot1: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"), NodeAddress.unresolved(9734, host = 198, 251, 89, 159), "LNTXBOT-E")
   val silentBob: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"02e9046555a9665145b0dbd7f135744598418df7d61d3660659641886ef1274844"), NodeAddress.unresolved(9735, host = 31, 16, 52, 37), "SilentBob")
+  val lightning: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03baa70886d9200af0ffbd3f9e18d96008331c858456b16e3a9b41e735c6208fef"), NodeAddress.unresolved(9735, host = 45, 20, 67, 1), "LIGHTNING")
   val acinq: RemoteNodeInfo = RemoteNodeInfo(PublicKey(hex"03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f"), NodeAddress.unresolved(9735, host = 34, 239, 230, 56), "ACINQ")
-  val syncNodes: Set[RemoteNodeInfo] = Set(satm, motherbase, generalBytes, conductor, silentBob, lntxbot1, acinq)
-  val phcSyncNodes: Set[RemoteNodeInfo] = Set(satm, motherbase)
+  val syncNodes: Set[RemoteNodeInfo] = Set(satm, motherbase, bCashIsTrash, ergveinNet, conductor, silentBob, lightning, acinq)
+  val phcSyncNodes: Set[RemoteNodeInfo] = Set(satm, motherbase, lntxbot1)
 
   val maxPHCCapacity: MilliSatoshi = MilliSatoshi(100000000000000L) // PHC can not be larger than 1000 BTC
   val minPHCCapacity: MilliSatoshi = MilliSatoshi(1000000000L) // PHC can not be smaller than 0.01 BTC
   val minNormalChansForPHC = 5 // How many normal chans a node must have to be eligible for PHCs
-  val maxPHCPerNode = 2 // How many PHCs a node can have in total
+  val maxPHCPerNode = 3 // How many PHCs a node can have in total
 
-  val minCapacity: MilliSatoshi = MilliSatoshi(500000000L) // 500k sat
-  val maxNodesToSyncFrom = 2 // How many disjoint peers to use for majority sync
-  val acceptThreshold = 1 // ShortIds and updates are accepted if confirmed by more than this peers
+  val minCapacity: MilliSatoshi = MilliSatoshi(750000000L) // 750k sat
+  val maxNodesToSyncFrom = 1 // How many disjoint peers to use for majority sync
+  val acceptThreshold = 0 // ShortIds and updates are accepted if confirmed by more than this peers
   val messagesToAsk = 400 // Ask for this many messages from peer before they say this chunk is done
   val chunksToWait = 4 // Wait for at least this much chunk iterations from any peer before recording results
 }
@@ -245,7 +233,7 @@ case class RemoteNodeInfo(nodeId: PublicKey, address: NodeAddress, alias: String
   lazy val nodeSpecificPair: KeyPairAndPubKey = KeyPairAndPubKey(KeyPair(nodeSpecificPubKey.value, nodeSpecificPrivKey.value), nodeId)
   lazy val nodeSpecificPrivKey: PrivateKey = nodeSpecificExtendedKey.privateKey
   lazy val nodeSpecificPubKey: PublicKey = nodeSpecificPrivKey.publicKey
-  def safeAlias: RemoteNodeInfo = copy(alias = new String)
+  def safeAlias: RemoteNodeInfo = copy(alias = alias take 24)
 }
 
 case class WalletSecret(keys: LightningNodeKeys, mnemonic: List[String], seed: ByteVector)
@@ -258,11 +246,11 @@ trait NetworkBag {
   def addChannelAnnouncement(ca: ChannelAnnouncement, newSqlPQ: PreparedQuery)
   def addChannelUpdateByPosition(cu: ChannelUpdate, newSqlPQ: PreparedQuery, updSqlPQ: PreparedQuery)
   // When adding an excluded channel we disregard an update position: channel as a whole is always excluded
-  def addExcludedChannel(shortId: ShortChannelId, untilStamp: Long, newSqlPQ: PreparedQuery)
-  def removeChannelUpdate(shortId: ShortChannelId, killSqlPQ: PreparedQuery)
+  def addExcludedChannel(shortId: Long, untilStamp: Long, newSqlPQ: PreparedQuery)
+  def removeChannelUpdate(shortId: Long, killSqlPQ: PreparedQuery)
 
   def addChannelUpdateByPosition(cu: ChannelUpdate)
-  def removeChannelUpdate(shortId: ShortChannelId)
+  def removeChannelUpdate(shortId: Long)
 
   def listChannelAnnouncements: Iterable[ChannelAnnouncement]
   def listChannelUpdates: Iterable[ChannelUpdateExt]
@@ -270,7 +258,7 @@ trait NetworkBag {
   def listExcludedChannels: Set[Long]
 
   def incrementScore(cu: ChannelUpdateExt)
-  def getRoutingData: Map[ShortChannelId, PublicChannel]
+  def getRoutingData: Map[Long, PublicChannel]
   def removeGhostChannels(ghostIds: ShortChanIdSet, oneSideIds: ShortChanIdSet)
   def processCompleteHostedData(pure: CompleteHostedRoutingData)
   def processPureData(data: PureRoutingData)
@@ -303,7 +291,7 @@ trait PaymentBag {
 
   def listRecentRelays(limit: Int): RichCursor
   def listRecentPayments(limit: Int): RichCursor
-  def listPendingSecrets: Set[ByteVector32]
+  def listPendingSecrets: Iterable[ByteVector32]
 
   def paymentSummary: Try[PaymentSummary]
   def relaySummary: Try[RelaySummary]
@@ -343,9 +331,9 @@ trait ChannelBag {
   def delete(channelId: ByteVector32)
 
   def htlcInfos(commitNumer: Long): Iterable[ChannelBag.Hash160AndCltv]
-  def putHtlcInfo(sid: ShortChannelId, commitNumber: Long, paymentHash: ByteVector32, cltvExpiry: CltvExpiry)
-  def putHtlcInfos(htlcs: Seq[DirectedHtlc], sid: ShortChannelId, commitNumber: Long)
-  def rmHtlcInfos(sid: ShortChannelId)
+  def putHtlcInfo(sid: Long, commitNumber: Long, paymentHash: ByteVector32, cltvExpiry: CltvExpiry)
+  def putHtlcInfos(htlcs: Seq[DirectedHtlc], sid: Long, commitNumber: Long)
+  def rmHtlcInfos(sid: Long)
 
   def channelTxFeesSummary: Try[ChannelTxFeesSummary]
   def addChannelTxFee(feePaid: Satoshi, idenitifer: String, tag: String)

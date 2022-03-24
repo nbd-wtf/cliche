@@ -44,7 +44,7 @@ class ElectrumWatcher(blockCount: AtomicLong, client: ActorRef) extends Actor wi
       context become running(height, header, Set(), Map(), block2tx, Queue.empty)
     case watch: Watch => context become disconnected(watches + watch, publishQueue, block2tx, getTxQueue)
     case publish: PublishAsap => context become disconnected(watches, publishQueue :+ publish, block2tx, getTxQueue)
-    case getTx: GetTxWithMeta => context become disconnected(watches, publishQueue, block2tx, getTxQueue :+ ((getTx, sender)))
+    case getTx: GetTxWithMeta => context become disconnected(watches, publishQueue, block2tx, getTxQueue :+ (getTx, sender))
   }
 
   def running(height: Int, tip: BlockHeader, watches: Set[Watch], scriptHashStatus: Map[ByteVector32, String], block2tx: SortedMap[Long, Seq[Transaction]], sent: Queue[Transaction]): Receive = {

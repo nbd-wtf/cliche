@@ -165,18 +165,18 @@ object Helpers {
       (closingTx, closingSigned)
     }
 
-    def checkClosingSignature(commitments: NormalCommits, localScriptPubkey: ByteVector, remoteScriptPubkey: ByteVector, remoteClosingFee: Satoshi, remoteClosingSig: ByteVector64): Transaction = {
+    def checkClosingSignature(commitments: NormalCommits, localScriptPubkey: ByteVector, remoteScriptPubkey: ByteVector, remote: ClosingSigned): Transaction = {
       val lastCommitFeeSatoshi = commitments.commitInput.txOut.amount - commitments.localCommit.publishableTxs.commitTx.tx.txOut.map(_.amount).sum
-      if (remoteClosingFee > lastCommitFeeSatoshi) throw ChannelTransitionFail(commitments.channelId)
+      if (remote.feeSatoshis > lastCommitFeeSatoshi) throw ChannelTransitionFail(commitments.channelId, remote)
 
       val localFundingKey = commitments.localParams.keys.fundingKey.publicKey
-      val (closingTx, closingSigned) = makeClosingTx(commitments, localScriptPubkey, remoteScriptPubkey, remoteClosingFee)
+      val (closingTx, closingSigned) = makeClosingTx(commitments, localScriptPubkey, remoteScriptPubkey, remote.feeSatoshis)
 
       val isAllUtxosAboveDust = checkClosingDustAmounts(closingTx)
-      if (!isAllUtxosAboveDust) throw ChannelTransitionFail(commitments.channelId)
+      if (!isAllUtxosAboveDust) throw ChannelTransitionFail(commitments.channelId, remote)
 
-      val signedTx = Transactions.addSigs(closingTx, localFundingKey, commitments.remoteParams.fundingPubKey, closingSigned.signature, remoteClosingSig)
-      if (Transactions.checkSpendable(signedTx).isFailure) throw ChannelTransitionFail(commitments.channelId)
+      val signedTx = Transactions.addSigs(closingTx, localFundingKey, commitments.remoteParams.fundingPubKey, closingSigned.signature, remote.signature)
+      if (Transactions.checkSpendable(signedTx).isFailure) throw ChannelTransitionFail(commitments.channelId, remote)
       signedTx.tx
     }
 
@@ -383,7 +383,7 @@ object Helpers {
 
     def findTimedOutHtlc(tx: Transaction, hash160: ByteVector, htlcs: Seq[UpdateAddHtlc], extractPaymentHash: PartialFunction[ScriptWitness, ByteVector], timeoutTxs: Seq[Transaction] = Nil): Option[UpdateAddHtlc] = {
       val matchingTxs = timeoutTxs.filter(_.lockTime == tx.lockTime).filter(_.txIn.map(_.witness).collect(extractPaymentHash) contains hash160).sortBy(tx => tx.txOut.map(_.amount.toLong).sum -> tx.txid.toHex)
-      val matchingHtlcs = htlcs.filter(add => add.cltvExpiry.toLong == tx.lockTime && ripemd160(add.paymentHash) == hash160).sortBy(add => add.amountMsat.toLong -> add.id)
+      val matchingHtlcs = htlcs.filter(add => add.cltvExpiry.underlying == tx.lockTime && ripemd160(add.paymentHash) == hash160).sortBy(add => add.amountMsat.toLong -> add.id)
       matchingHtlcs.zip(matchingTxs).collectFirst { case (add, timeoutTx) if timeoutTx.txid == tx.txid => add }
     }
 

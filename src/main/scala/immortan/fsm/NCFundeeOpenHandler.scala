@@ -1,5 +1,6 @@
 package immortan.fsm
 
+import fr.acinq.eclair.Features.StaticRemoteKey
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.wire._
 import immortan.Channel.{WAIT_FOR_ACCEPT, WAIT_FUNDING_DONE}
@@ -15,7 +16,6 @@ abstract class NCFundeeOpenHandler(info: RemoteNodeInfo, theirOpen: OpenChannel,
   private val freshChannel = new ChannelNormal(cm.chanBag) {
     def SEND(messages: LightningMessage*): Unit = CommsTower.sendMany(messages, info.nodeSpecificPair)
     def STORE(normalData: PersistentChannelData): PersistentChannelData = cm.chanBag.put(normalData)
-    val chainWallet: WalletExt = LNParams.chainWallets
   }
 
   private val makeChanListener = new ConnectionListener with ChannelListener { me =>
@@ -28,9 +28,8 @@ abstract class NCFundeeOpenHandler(info: RemoteNodeInfo, theirOpen: OpenChannel,
     }
 
     override def onOperational(worker: CommsTower.Worker, theirInit: Init): Unit = {
-      val stickyChannelFeatures = ChannelFeatures.pickChannelFeatures(LNParams.ourInit.features, theirInit.features)
-      val localParams = LNParams.makeChannelParams(freshChannel.chainWallet, isFunder = false, theirOpen.fundingSatoshis)
-      freshChannel process INPUT_INIT_FUNDEE(info.safeAlias, localParams, theirInit, stickyChannelFeatures, theirOpen)
+      val localParams = LNParams.makeChannelParams(isFunder = false, theirOpen.fundingSatoshis)
+      freshChannel process INPUT_INIT_FUNDEE(info.safeAlias, localParams, theirInit, ChannelFeatures(StaticRemoteKey), theirOpen)
     }
 
     override def onBecome: PartialFunction[Transition, Unit] = {

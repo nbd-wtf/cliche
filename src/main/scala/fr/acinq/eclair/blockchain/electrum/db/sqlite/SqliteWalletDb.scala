@@ -43,8 +43,8 @@ object SqliteWalletDb {
 
   val seqOfTransactionHistoryItemCodec = listOfN[TransactionHistoryItem](uint16, transactionHistoryItemCodec)
 
-  val historyCodec: Codec[Map[ByteVector32, ElectrumWallet.TransactionHistoryItemList]] = Codec[Map[ByteVector32, ElectrumWallet.TransactionHistoryItemList]](
-    (runtimeMap: Map[ByteVector32, ElectrumWallet.TransactionHistoryItemList]) => listOfN(uint16, bytes32 ~ seqOfTransactionHistoryItemCodec).encode(runtimeMap.toList),
+  val historyCodec: Codec[Map[ByteVector32, ElectrumWallet.TxHistoryItemList]] = Codec[Map[ByteVector32, ElectrumWallet.TxHistoryItemList]](
+    (runtimeMap: Map[ByteVector32, ElectrumWallet.TxHistoryItemList]) => listOfN(uint16, bytes32 ~ seqOfTransactionHistoryItemCodec).encode(runtimeMap.toList),
     (wire: BitVector) => listOfN(uint16, bytes32 ~ seqOfTransactionHistoryItemCodec).decode(wire).map(_.map(_.toMap))
   )
 
@@ -53,10 +53,7 @@ object SqliteWalletDb {
     (wire: BitVector) => listOfN(uint16, bytes32 ~ proofCodec).decode(wire).map(_.map(_.toMap))
   )
 
-  val version = 0x0000
-
   val persistentDataCodec: Codec[PersistentData] = {
-    (constant(BitVector fromInt version) withContext "version") ::
       (int32 withContext "accountKeysCount") ::
       (int32 withContext "changeKeysCount") ::
       (statusCodec withContext "status") ::
@@ -64,6 +61,7 @@ object SqliteWalletDb {
       (overrideCodec withContext "overriddenPendingTxids") ::
       (historyCodec withContext "history") ::
       (proofsCodec withContext "proofs") ::
-      (listOfN(uint16, txCodec) withContext "pendingTransactions")
+      (listOfN(uint16, txCodec) withContext "pendingTransactions") ::
+      (listOfN(uint16, outPointCodec) withContext "excludedOutpoints")
   }.as[PersistentData]
 }

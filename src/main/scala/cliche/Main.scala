@@ -1,7 +1,8 @@
 package cliche
 
-import java.io.{File, FileInputStream}
+import java.io.{File}
 import java.net.InetSocketAddress
+import scala.io.{Source}
 import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
 import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
@@ -168,40 +169,17 @@ object Main extends App {
         sys.exit(1)
     }
 
-    LNParams.routerConf = RouterConf(initRouteMaxLength = 6)
+    LNParams.routerConf =
+      RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
     LNParams.ourInit = LNParams.createInit
     LNParams.syncParams = new SyncParams
   }
-
-  final val GRAPH_NAME = "graph.snapshot"
-  final val GRAPH_EXTENSION = ".zlib"
-
-  def getNetwork(chainHash: ByteVector32): String = chainHash match {
-    case Block.LivenetGenesisBlock.hash => "mainnet"
-    case Block.TestnetGenesisBlock.hash => "testnet"
-    case _                              => "unknown"
-  }
-
-  def getGraphResourceName(chainHash: ByteVector32): String =
-    s"$GRAPH_NAME-${this.getNetwork(chainHash)}$GRAPH_EXTENSION"
 
   def makeSecret(): WalletSecret = {
     val walletSeed =
       MnemonicCode.toSeed(config.mnemonics, passphrase = new String)
     val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
     val secret = WalletSecret(keys, config.mnemonics, walletSeed)
-
-    try {
-      // Implant graph into db file from resources
-      val snapshotName = getGraphResourceName(LNParams.chainHash)
-      val compressedPlainBytes = ByteStreams.toByteArray(
-        new FileInputStream(new File(s"${config.assetsDir}/$snapshotName"))
-      )
-      val plainBytes = ExtCodecs.compressedByteVecCodec.decode(
-        BitVector view compressedPlainBytes
-      )
-//      LocalBackup.copyPlainDataToDbLocation(host, WalletApp.dbFileNameGraph, plainBytes.require.value)
-    } catch none
 
     extDataBag.putSecret(secret)
     secret
@@ -266,17 +244,11 @@ object Main extends App {
     ElectrumClientPool.loadFromChainHash = {
       case Block.LivenetGenesisBlock.hash =>
         ElectrumClientPool.readServerAddresses(
-          new FileInputStream(
-            new File(s"${config.assetsDir}/servers_mainnet.json")
-          ),
-          sslEnabled = true
+          Source.fromResource("servers_mainnet.json")
         )
       case Block.TestnetGenesisBlock.hash =>
         ElectrumClientPool.readServerAddresses(
-          new FileInputStream(
-            new File(s"${config.assetsDir}/servers_testnet.json")
-          ),
-          sslEnabled = true
+          Source.fromResource("servers_testnet.json")
         )
       case _ => throw new RuntimeException
     }
@@ -284,15 +256,11 @@ object Main extends App {
     CheckPoint.loadFromChainHash = {
       case Block.LivenetGenesisBlock.hash =>
         CheckPoint.load(
-          new FileInputStream(
-            new File(s"${config.assetsDir}/checkpoints_mainnet.json")
-          )
+          Source.fromResource("checkpoints_mainnet.json")
         )
       case Block.TestnetGenesisBlock.hash =>
         CheckPoint.load(
-          new FileInputStream(
-            new File(s"${config.assetsDir}/checkpoints_testnet.json")
-          )
+          Source.fromResource("checkpoints_testnet.json")
         )
       case _ => throw new RuntimeException
     }
@@ -303,8 +271,13 @@ object Main extends App {
     }
 
     val params =
-      WalletParameters(extDataBag, chainWalletBag, dustLimit = 546L.sat)
-    val pool = LNParams.loggedActor(
+      WalletParameters(
+        extDataBag,
+        chainWalletBag,
+        txDataBag,
+        dustLimit = 546L.sat
+      )
+    val electrumPool = LNParams.loggedActor(
       Props(
         classOf[ElectrumClientPool],
         LNParams.blockCount,
@@ -316,14 +289,14 @@ object Main extends App {
     val sync = LNParams.loggedActor(
       Props(
         classOf[ElectrumChainSync],
-        pool,
+        electrumPool,
         params.headerDb,
         LNParams.chainHash
       ),
       "chain-sync"
     )
     val watcher = LNParams.loggedActor(
-      Props(classOf[ElectrumWatcher], LNParams.blockCount, pool),
+      Props(classOf[ElectrumWatcher], LNParams.blockCount, electrumPool),
       "channel-watcher"
     )
     val catcher =
@@ -334,38 +307,41 @@ object Main extends App {
         wallets = Nil,
         catcher,
         sync,
-        pool,
+        electrumPool,
         watcher,
         params
       ) /: chainWalletBag.listWallets) {
-        case walletExt1 ~ CompleteChainWalletInfo(
+        case ext ~ CompleteChainWalletInfo(
               core: SigningWallet,
-              persistentSigningData,
+              persistentSigningWalletData,
               lastBalance,
-              label
+              label,
+              false
             ) =>
-          val signingWallet: ElectrumEclairWallet =
-            walletExt1.makeSigningWalletParts(core, lastBalance, label)
-          signingWallet.walletRef ! persistentSigningData
-          walletExt1 + signingWallet
+          val signingWallet =
+            ext.makeSigningWalletParts(core, lastBalance, label)
+          signingWallet.walletRef ! persistentSigningWalletData
+          ext.copy(wallets = signingWallet :: ext.wallets)
 
-        case walletExt1 ~ CompleteChainWalletInfo(
+        case ext ~ CompleteChainWalletInfo(
               core: WatchingWallet,
-              persistentWatchingData,
+              persistentWatchingWalletData,
               lastBalance,
-              label
+              label,
+              false
             ) =>
           val watchingWallet =
-            walletExt1.makeWatchingWalletParts(core, lastBalance, label)
-          watchingWallet.walletRef ! persistentWatchingData
-          walletExt1 + watchingWallet
+            ext.makeWatchingWallet84Parts(core, lastBalance, label)
+          watchingWallet.walletRef ! persistentWatchingWalletData
+          ext.copy(wallets = watchingWallet :: ext.wallets)
       }
 
     LNParams.chainWallets = if (walletExt.wallets.isEmpty) {
-      val params = SigningWallet(EclairWallet.BIP84, isRemovable = false)
-      val label = "Bitcoin"
-      println(params)
-      walletExt.withNewSigning(params, label)
+      val core =
+        SigningWallet(walletType = EclairWallet.BIP84, isRemovable = false)
+      val wallet =
+        walletExt.makeSigningWalletParts(core, Satoshi(0L), "Bitcoin")
+      walletExt.withFreshWallet(wallet)
     } else walletExt
 
     LNParams.feeRates.listeners += new FeeRatesListener {
@@ -387,9 +363,18 @@ object Main extends App {
         LNParams.cm.initConnect
 
       override def onWalletReady(event: WalletReady): Unit =
-        LNParams.updateChainWallet(
-          LNParams.chainWallets withBalanceUpdated event
-        )
+        LNParams.synchronized {
+          def sameXPub(wallet: ElectrumEclairWallet): Boolean =
+            wallet.ewt.xPub == event.xPub
+          LNParams.chainWallets = LNParams.chainWallets.modify(
+            _.wallets.eachWhere(sameXPub).info
+          ) using { info =>
+            info.copy(
+              lastBalance = event.balance,
+              isCoinControlOn = event.excludedOutPoints.nonEmpty
+            )
+          }
+        }
 
       override def onChainMasterSelected(event: InetSocketAddress): Unit =
         currentChainNode = event.asSome
@@ -409,7 +394,7 @@ object Main extends App {
               sent,
               description,
               isIncoming,
-              MilliSatoshi.toMilliSatoshi(totalBalance - sent)
+              MilliSatoshi((totalBalance - sent).toLong * 1000)
             )
           case _ =>
             doAddChainTx(
@@ -417,7 +402,7 @@ object Main extends App {
               sent,
               description,
               isIncoming,
-              MilliSatoshi.toMilliSatoshi(totalBalance)
+              MilliSatoshi(totalBalance.toLong * 1000)
             )
         }
 
@@ -438,7 +423,8 @@ object Main extends App {
             description,
             isIncoming,
             balanceSnap = totalBalance,
-            LNParams.fiatRates.info.rates
+            LNParams.fiatRates.info.rates,
+            event.stamp
           )
           txDataBag.addSearchableTransaction(
             description.queryText(event.tx.txid),

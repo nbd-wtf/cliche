@@ -4,54 +4,60 @@ import java.util.concurrent.{Executors, TimeUnit}
 
 import com.google.common.cache.CacheBuilder
 import fr.acinq.bitcoin.Crypto
+import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.eclair.router.Graph.GraphStructure.{DirectedGraph, GraphEdge}
 import fr.acinq.eclair.router.RouteCalculation.handleRouteRequest
 import fr.acinq.eclair.router.Router.{Data, PublicChannel, RouteRequest}
 import fr.acinq.eclair.router.{ChannelUpdateExt, Router}
-import fr.acinq.eclair.wire.ChannelUpdate
-import fr.acinq.eclair.{CltvExpiryDelta, MilliSatoshi, ShortChannelId, nodeFee}
+import fr.acinq.eclair.wire._
+import fr.acinq.eclair.{CltvExpiryDelta, MilliSatoshi}
 import immortan.PathFinder._
 import immortan.crypto.Tools._
 import immortan.crypto.{CanBeRepliedTo, StateMachine}
-import immortan.utils.{Rx, Statistics}
+import immortan.fsm.SendMultiPart
+import immortan.utils.Rx
 import rx.lang.scala.Subscription
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.util.Random.shuffle
 
 
 object PathFinder {
-  val NotifyRejected = "path-finder-notify-rejected"
-  val NotifyOperational = "path-finder-notify-operational"
   val CMDStartPeriodicResync = "cmd-start-periodic-resync"
-  val CMDRequestSyncProgress = "smd-request-sync-progress"
   val CMDLoadGraph = "cmd-load-graph"
+  val CMDResync = "cmd-resync"
 
   val WAITING = 0
   val OPERATIONAL = 1
 
-  case class AvgHopParams(cltvExpiryDelta: CltvExpiryDelta, feeProportionalMillionths: Long, feeBaseMsat: MilliSatoshi, sampleSize: Long) {
-    def avgHopFee(amount: MilliSatoshi): MilliSatoshi = nodeFee(feeBaseMsat, feeProportionalMillionths, amount)
-  }
+  sealed trait PathFinderRequest { val sender: CanBeRepliedTo }
+  case class FindRoute(sender: CanBeRepliedTo, request: RouteRequest) extends PathFinderRequest
+  case class GetExpectedPaymentFees(sender: CanBeRepliedTo, cmd: SendMultiPart) extends PathFinderRequest
+  case class GetExpectedRouteFees(sender: CanBeRepliedTo, payee: PublicKey) extends PathFinderRequest
 
-  case class FindRoute(sender: CanBeRepliedTo, request: RouteRequest)
+  case class ExpectedFees(interHop: AvgHopParams, payeeHop: AvgHopParams) {
+    def partialRoute(interHops: Int): Seq[AvgHopParams] = List.fill(interHops)(interHop) :+ payeeHop
+    def accumulate(hasRelayFee: AvgHopParams, acc: MilliSatoshi): MilliSatoshi = hasRelayFee.relayFee(acc) + acc
+    def percentOf(amount: MilliSatoshi, interHops: Int): Double = ratio(amount, totalWithFeeReserve(amount, interHops) - amount)
+    def totalWithFeeReserve(amount: MilliSatoshi, interHops: Int): MilliSatoshi = partialRoute(interHops).foldRight(amount)(accumulate)
+    def totalCltvDelta(interHops: Int): CltvExpiryDelta = partialRoute(interHops).map(_.cltvExpiryDelta).reduce(_ + _)
+  }
 }
 
 abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) extends StateMachine[Data] { me =>
-  private val extraEdges = CacheBuilder.newBuilder.expireAfterWrite(1, TimeUnit.DAYS).maximumSize(5000).build[ShortChannelId, GraphEdge]
-  val extraEdgesMap: mutable.Map[ShortChannelId, GraphEdge] = extraEdges.asMap.asScala
+  private val extraEdgesCache = CacheBuilder.newBuilder.expireAfterWrite(1, TimeUnit.DAYS).maximumSize(500).build[java.lang.Long, GraphEdge]
+  val extraEdges: mutable.Map[java.lang.Long, GraphEdge] = extraEdgesCache.asMap.asScala
 
   var listeners: Set[CanBeRepliedTo] = Set.empty
   var subscription: Option[Subscription] = None
   var syncMaster: Option[SyncMaster] = None
-  var debugMode: Boolean = false
 
   implicit val context: ExecutionContextExecutor = ExecutionContext fromExecutor Executors.newSingleThreadExecutor
   def process(changeMessage: Any): Unit = scala.concurrent.Future(me doProcess changeMessage)
 
-  private val CMDResync = "cmd-resync"
-  private val RESYNC_PERIOD: Long = 1000L * 3600 * 48
+  private val RESYNC_PERIOD: Long = 1000L * 3600 * 24 * 4
   // We don't load routing data on every startup but when user (or system) actually needs it
   become(Data(channels = Map.empty, hostedChannels = Map.empty, DirectedGraph.empty), WAITING)
 
@@ -66,29 +72,22 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
 
   def doProcess(change: Any): Unit = (change, state) match {
     case (CMDStartPeriodicResync, WAITING | OPERATIONAL) if subscription.isEmpty =>
-      val repeat = Rx.repeat(Rx.ioQueue, Rx.incHour, times = 49 to Int.MaxValue by 49)
+      val repeat = Rx.repeat(Rx.ioQueue, Rx.incHour, times = 97 to Int.MaxValue by 97)
       // Resync every RESYNC_PERIOD hours + 1 hour to trigger a full resync, not just PHC resync
-      val delay = Rx.initDelay(repeat, getLastTotalResyncStamp, RESYNC_PERIOD, preStartMsec = 100)
+      val delay = Rx.initDelay(repeat, getLastTotalResyncStamp, RESYNC_PERIOD, preStartMsec = 500)
       subscription = delay.subscribe(_ => me process CMDResync).asSome
 
-    case (fr: FindRoute, OPERATIONAL) if data.channels.isEmpty =>
-      // Graph is loaded but empty: likely a first launch or synchronizing
-      fr.sender process NotifyRejected
+    case (calc: GetExpectedRouteFees, OPERATIONAL) => calc.sender process calcExpectedFees(calc.payee)
 
-    case (fr: FindRoute, OPERATIONAL) =>
-      // Search through single pre-selected local channel
-      val augmentedGraph = data.graph replaceEdge fr.request.localEdge
-      fr.sender process handleRouteRequest(augmentedGraph, fr.request)
+    case (calc: GetExpectedPaymentFees, OPERATIONAL) => calc.sender process calc.cmd.copy(expectedRouteFees = calcExpectedFees(calc.cmd.targetNodeId).asSome)
 
-    case (fr: FindRoute, WAITING) if debugMode =>
-      // Do not proceed, just inform the sender
-      fr.sender process NotifyRejected
+    case (fr: FindRoute, OPERATIONAL) => fr.sender process handleRouteRequest(data.graph replaceEdge fr.request.localEdge, fr.request)
 
-    case (fr: FindRoute, WAITING) =>
-      // We need a loaded routing data to search for path properly
-      // load that data while notifying sender if it's absent
-      fr.sender process NotifyRejected
+    case (request: PathFinderRequest, WAITING) =>
+      // We need a loaded routing data to process these requests
+      // load that data before proceeding if it's absent
       me process CMDLoadGraph
+      me process request
 
     case (CMDResync, WAITING) =>
       // We need a loaded routing data to sync properly
@@ -99,30 +98,26 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
     case (CMDLoadGraph, WAITING) =>
       val normalShortIdToPubChan = normalBag.getRoutingData
       val hostedShortIdToPubChan = hostedBag.getRoutingData
-      val searchGraph1 = DirectedGraph.makeGraph(normalShortIdToPubChan ++ hostedShortIdToPubChan).addEdges(extraEdgesMap.values)
+      val searchGraph1 = DirectedGraph.makeGraph(normalShortIdToPubChan ++ hostedShortIdToPubChan).addEdges(extraEdges.values)
       become(Data(normalShortIdToPubChan, hostedShortIdToPubChan, searchGraph1), OPERATIONAL)
-      if (data.channels.nonEmpty) listeners.foreach(_ process NotifyOperational)
 
     case (CMDResync, OPERATIONAL) if System.currentTimeMillis - getLastNormalResyncStamp > RESYNC_PERIOD =>
-      val setupData = SyncMasterShortIdData(LNParams.syncParams.syncNodes, getExtraNodes, Set.empty, Map.empty, LNParams.syncParams.maxNodesToSyncFrom)
+      val setupData = SyncMasterShortIdData(LNParams.syncParams.syncNodes, getExtraNodes, Set.empty, Map.empty)
 
-      val normalSync = new SyncMaster(normalBag.listExcludedChannels, data) { self =>
-        def onShortIdsSyncComplete(state: SyncMasterShortIdData): Unit = listeners.foreach(_ process state)
-        def onChunkSyncComplete(pure: PureRoutingData): Unit = me process pure
-        def onTotalSyncComplete: Unit = me process self
+      val requestNodeAnnounceForChan = for {
+        info <- getExtraNodes ++ getPHCExtraNodes
+        edges <- data.graph.vertices.get(info.nodeId)
+      } yield shuffle(edges).head.desc.shortChannelId
+
+      val normalSync = new SyncMaster(normalBag.listExcludedChannels, requestNodeAnnounceForChan, data, LNParams.syncParams.maxNodesToSyncFrom) { self =>
+        override def onNodeAnnouncement(nodeAnnouncement: NodeAnnouncement): Unit = listeners.foreach(_ process nodeAnnouncement)
+        override def onChunkSyncComplete(pureRoutingData: PureRoutingData): Unit = me process pureRoutingData
+        override def onTotalSyncComplete: Unit = me process self
       }
 
       syncMaster = normalSync.asSome
+      listeners.foreach(_ process CMDResync)
       normalSync process setupData
-
-    case (CMDRequestSyncProgress, OPERATIONAL) =>
-      // One of listeners is interested in current sync progress
-      // Send back whatever sync stage data we happen to have
-
-      for {
-        sync <- syncMaster
-        listener <- listeners
-      } listener process sync.data
 
     case (CMDResync, OPERATIONAL) if System.currentTimeMillis - getLastTotalResyncStamp > RESYNC_PERIOD =>
       // Normal resync has happened recently, but PHC resync is outdated (PHC failed last time due to running out of attempts)
@@ -135,7 +130,7 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
 
       // Then reconstruct graph with new PHC data
       val hostedShortIdToPubChan = hostedBag.getRoutingData
-      val searchGraph = DirectedGraph.makeGraph(data.channels ++ hostedShortIdToPubChan).addEdges(extraEdgesMap.values)
+      val searchGraph = DirectedGraph.makeGraph(data.channels ++ hostedShortIdToPubChan).addEdges(extraEdges.values)
       become(Data(data.channels, hostedShortIdToPubChan, searchGraph), OPERATIONAL)
       updateLastTotalResyncStamp(System.currentTimeMillis)
       listeners.foreach(_ process phcPure)
@@ -152,16 +147,16 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
       val oneSideShortIds = normalBag.listChannelsWithOneUpdate
       val ghostIds = normalShortIdToPubChan.keySet.diff(sync.provenShortIds)
       val normalShortIdToPubChan1 = normalShortIdToPubChan -- ghostIds -- oneSideShortIds
-      val searchGraph = DirectedGraph.makeGraph(normalShortIdToPubChan1 ++ data.hostedChannels).addEdges(extraEdgesMap.values)
+      val searchGraph = DirectedGraph.makeGraph(normalShortIdToPubChan1 ++ data.hostedChannels).addEdges(extraEdges.values)
       become(Data(normalShortIdToPubChan1, data.hostedChannels, searchGraph), OPERATIONAL)
       // Update normal checkpoint, if PHC sync fails this time we'll jump to it next time
       updateLastNormalResyncStamp(System.currentTimeMillis)
 
       // Perform database cleaning in a different thread since it's slow and we are operational
       Rx.ioQueue.foreach(_ => normalBag.removeGhostChannels(ghostIds, oneSideShortIds), none)
+      // Remove by now useless reference, this may be used to define if sync is on
+      syncMaster = None
 
-      // Notify that Pathfinder is operational
-      listeners.foreach(_ process NotifyOperational)
       // Notify that normal graph sync is complete
       listeners.foreach(_ process sync)
       attemptPHCSync
@@ -180,8 +175,8 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
       become(data1, OPERATIONAL)
 
     case (cu: ChannelUpdate, OPERATIONAL) =>
-      // Last chance: if it's not a known public update then maybe it's a private one
-      Option(extraEdges getIfPresent cu.shortChannelId).foreach { extEdge =>
+      extraEdges.get(cu.shortChannelId).foreach { extEdge =>
+        // Last chance: not a known public update, maybe it's a private one
         val edge1 = extEdge.copy(updExt = extEdge.updExt withNewUpdate cu)
         val data1 = resolveKnownDesc(storeOpt = None, edge1)
         become(data1, OPERATIONAL)
@@ -189,9 +184,9 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
 
     case (edge: GraphEdge, WAITING | OPERATIONAL) if !data.channels.contains(edge.desc.shortChannelId) =>
       // We add assisted routes to graph as if they are normal channels, also rememeber them to refill later if graph gets reloaded
-      // these edges will be private most of the time, but they also may be public yet not visible to us for some reason
+      // these edges will be private most of the time, but they also may be public but yet not visible to us for some reason
+      extraEdgesCache.put(edge.updExt.update.shortChannelId, edge)
       val data1 = data.copy(graph = data.graph replaceEdge edge)
-      extraEdges.put(edge.updExt.update.shortChannelId, edge)
       become(data1, state)
 
     case _ =>
@@ -234,7 +229,7 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
 
     case None =>
       // This is a legitimate private/unknown-public update
-      extraEdges.put(edge.updExt.update.shortChannelId, edge)
+      extraEdgesCache.put(edge.updExt.update.shortChannelId, edge)
       // Don't save this in DB but update runtime graph
       data.copy(graph = data.graph replaceEdge edge)
   }
@@ -242,21 +237,18 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag) 
   def nodeIdFromUpdate(cu: ChannelUpdate): Option[Crypto.PublicKey] =
     data.channels.get(cu.shortChannelId).map(_.ann getNodeIdSameSideAs cu) orElse
       data.hostedChannels.get(cu.shortChannelId).map(_.ann getNodeIdSameSideAs cu) orElse
-      extraEdgesMap.get(cu.shortChannelId).map(_.desc.from)
+      extraEdges.get(cu.shortChannelId).map(_.desc.from)
 
   def attemptPHCSync: Unit = {
     if (LNParams.syncParams.phcSyncNodes.nonEmpty) {
-      val master = new PHCSyncMaster(data) { def onSyncComplete(pure: CompleteHostedRoutingData): Unit = me process pure }
-      master process SyncMasterPHCData(LNParams.syncParams.phcSyncNodes, getPHCExtraNodes, Set.empty)
+      val master = new PHCSyncMaster(data) { override def onSyncComplete(pure: CompleteHostedRoutingData): Unit = me process pure }
+      master process SyncMasterPHCData(LNParams.syncParams.phcSyncNodes, getPHCExtraNodes, activeSyncs = Set.empty)
     } else updateLastTotalResyncStamp(System.currentTimeMillis)
   }
 
-  def getAvgHopParams: AvgHopParams = {
-    val sample = data.channels.values.toVector.flatMap(pc => pc.update1Opt ++ pc.update2Opt)
-    val noFeeOutliers = Statistics.removeExtremeOutliers(sample)(_.update.feeProportionalMillionths)
-    val cltvExpiryDelta = CltvExpiryDelta(Statistics.meanBy(noFeeOutliers)(_.update.cltvExpiryDelta.toInt).toInt)
-    val proportional = Statistics.meanBy(noFeeOutliers)(_.update.feeProportionalMillionths).toLong
-    val base = MilliSatoshi(Statistics.meanBy(noFeeOutliers)(_.update.feeBaseMsat).toLong)
-    AvgHopParams(cltvExpiryDelta, proportional, base, noFeeOutliers.size)
+  def calcExpectedFees(nodeId: PublicKey): ExpectedFees = {
+    val payeeHops = data.graph.vertices.getOrElse(nodeId, default = Nil).map(_.updExt)
+    val payeeAvgParams = if (payeeHops.isEmpty) data.avgHopParams else Router.getAvgHopParams(payeeHops)
+    ExpectedFees(data.avgHopParams, payeeAvgParams)
   }
 }
