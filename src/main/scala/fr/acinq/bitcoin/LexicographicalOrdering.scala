@@ -4,9 +4,8 @@ import scodec.bits.ByteVector
 
 import scala.annotation.tailrec
 
-/**
-  * Lexicographical Ordering of Transaction Inputs and Outputs
-  * see https://github.com/bitcoin/bips/blob/master/bip-0069.mediawiki
+/** Lexicographical Ordering of Transaction Inputs and Outputs see
+  * https://github.com/bitcoin/bips/blob/master/bip-0069.mediawiki
   */
 object LexicographicalOrdering {
   @tailrec
@@ -39,10 +38,13 @@ object LexicographicalOrdering {
     else (a.amount.compare(b.amount) < 0)
   }
 
-  /**
-    *
-    * @param tx input transaction
-    * @return the input tx with inputs and outputs sorted in lexicographical order
+  /** @param tx
+    *   input transaction
+    * @return
+    *   the input tx with inputs and outputs sorted in lexicographical order
     */
-  def sort(tx: Transaction): Transaction = tx.copy(txIn = tx.txIn.sortWith(isLessThan), txOut = tx.txOut.sortWith(isLessThan))
+  def sort(tx: Transaction): Transaction = tx.copy(
+    txIn = tx.txIn.sortWith(isLessThan),
+    txOut = tx.txOut.sortWith(isLessThan)
+  )
 }

@@ -2,7 +2,6 @@ package immortan
 
 import fr.acinq.eclair.wire.Fail
 
-
 object ErrorCodes {
   final val ERR_HOSTED_WRONG_BLOCKDAY = "0001"
   final val ERR_HOSTED_WRONG_LOCAL_SIG = "0002"
@@ -15,7 +14,7 @@ object ErrorCodes {
   final val ERR_HOSTED_INVALID_RESIZE = "0009"
   final val ERR_MISSING_CHANNEL = "0010"
 
-  val knownHostedCodes: Map[String, String] = Map (
+  val knownHostedCodes: Map[String, String] = Map(
     ERR_HOSTED_WRONG_BLOCKDAY -> "ERR_HOSTED_WRONG_BLOCKDAY",
     ERR_HOSTED_WRONG_LOCAL_SIG -> "ERR_HOSTED_WRONG_LOCAL_SIG",
     ERR_HOSTED_WRONG_REMOTE_SIG -> "ERR_HOSTED_WRONG_REMOTE_SIG",
@@ -36,7 +35,8 @@ object ErrorExt {
 
     ErrorCodes.knownHostedCodes.get(tag) match {
       case Some(codeOnly) if postTagData.isEmpty => s"hosted-code=$codeOnly"
-      case Some(code) => s"hosted-code=$code, extra=${error.copy(data = postTagData).toAscii}"
+      case Some(code) =>
+        s"hosted-code=$code, extra=${error.copy(data = postTagData).toAscii}"
       case None => error.toAscii
     }
   }

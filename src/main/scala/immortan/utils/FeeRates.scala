@@ -7,7 +7,6 @@ import immortan.utils.FeeRates._
 import immortan.utils.ImplicitJsonFormats._
 import immortan.{DataBag, LNParams}
 
-
 object FeeRates {
   val minPerKw: FeeratePerKw = FeeratePerKw(1000L.sat)
 
@@ -27,15 +26,21 @@ object FeeRates {
   def smoothedFeeratesPerKw(history: List[FeeratesPerKB] = Nil): FeeratesPerKw =
     FeeratesPerKw(
       FeeratesPerKB(
-        FeeratePerKB(Statistics.meanBy(history)(_.mempoolMinFee.toLong).toLong.sat),
+        FeeratePerKB(
+          Statistics.meanBy(history)(_.mempoolMinFee.toLong).toLong.sat
+        ),
         FeeratePerKB(Statistics.meanBy(history)(_.block_1.toLong).toLong.sat),
         FeeratePerKB(Statistics.meanBy(history)(_.blocks_2.toLong).toLong.sat),
         FeeratePerKB(Statistics.meanBy(history)(_.blocks_6.toLong).toLong.sat),
         FeeratePerKB(Statistics.meanBy(history)(_.blocks_12.toLong).toLong.sat),
         FeeratePerKB(Statistics.meanBy(history)(_.blocks_36.toLong).toLong.sat),
         FeeratePerKB(Statistics.meanBy(history)(_.blocks_72.toLong).toLong.sat),
-        FeeratePerKB(Statistics.meanBy(history)(_.blocks_144.toLong).toLong.sat),
-        FeeratePerKB(Statistics.meanBy(history)(_.blocks_1008.toLong).toLong.sat)
+        FeeratePerKB(
+          Statistics.meanBy(history)(_.blocks_144.toLong).toLong.sat
+        ),
+        FeeratePerKB(
+          Statistics.meanBy(history)(_.blocks_1008.toLong).toLong.sat
+        )
       )
     )
 }
@@ -44,14 +49,23 @@ class FeeRates(bag: DataBag) extends CanBeShutDown {
   override def becomeShutDown: Unit = listeners = Set.empty
 
   def reloadData: FeeratesPerKB = fr.acinq.eclair.secureRandom nextInt 3 match {
-    case 0 => new EsploraFeeProvider("https://blockstream.info/api/fee-estimates").provide
-    case 1 => new EsploraFeeProvider("https://mempool.space/api/fee-estimates").provide
+    case 0 =>
+      new EsploraFeeProvider(
+        "https://blockstream.info/api/fee-estimates"
+      ).provide
+    case 1 =>
+      new EsploraFeeProvider("https://mempool.space/api/fee-estimates").provide
     case _ => BitgoFeeProvider.provide
   }
 
   def updateInfo(newPerKB: FeeratesPerKB): Unit = {
-    val history1 = (newPerKB :: info.history).diff(defaultFeerates :: Nil).take(2)
-    info = FeeRatesInfo(smoothedFeeratesPerKw(history1), history1, System.currentTimeMillis)
+    val history1 =
+      (newPerKB :: info.history).diff(defaultFeerates :: Nil).take(2)
+    info = FeeRatesInfo(
+      smoothedFeeratesPerKw(history1),
+      history1,
+      System.currentTimeMillis
+    )
     for (lst <- listeners) lst.onFeeRates(info)
   }
 
@@ -61,9 +75,21 @@ class FeeRates(bag: DataBag) extends CanBeShutDown {
   }
 }
 
-case class FeeRatesInfo(smoothed: FeeratesPerKw, history: List[FeeratesPerKB], stamp: Long) {
-  private val targets = FeeTargets(fundingBlockTarget = 36, commitmentBlockTarget = 12, mutualCloseBlockTarget = 72, claimMainBlockTarget = 144)
-  private val estimator = new FeeEstimator { override def getFeeratePerKw(target: Int): FeeratePerKw = smoothed.feePerBlock(target) max minPerKw }
+case class FeeRatesInfo(
+    smoothed: FeeratesPerKw,
+    history: List[FeeratesPerKB],
+    stamp: Long
+) {
+  private val targets = FeeTargets(
+    fundingBlockTarget = 36,
+    commitmentBlockTarget = 12,
+    mutualCloseBlockTarget = 72,
+    claimMainBlockTarget = 144
+  )
+  private val estimator = new FeeEstimator {
+    override def getFeeratePerKw(target: Int): FeeratePerKw =
+      smoothed.feePerBlock(target) max minPerKw
+  }
   val onChainFeeConf: OnChainFeeConf = OnChainFeeConf(targets, estimator)
 }
 
@@ -82,7 +108,8 @@ class EsploraFeeProvider(val url: String) extends FeeRatesProvider {
   type EsploraFeeStructure = Map[String, Long]
 
   def provide: FeeratesPerKB = {
-    val structure = to[EsploraFeeStructure](LNParams.connectionProvider.get(url).string)
+    val structure =
+      to[EsploraFeeStructure](LNParams.connectionProvider.get(url).string)
 
     FeeratesPerKB(
       mempoolMinFee = extractFeerate(structure, 1008),
@@ -99,7 +126,10 @@ class EsploraFeeProvider(val url: String) extends FeeRatesProvider {
 
   // First we keep only fee ranges with a max block delay below the limit
   // out of all the remaining fee ranges, we select the one with the minimum higher bound
-  def extractFeerate(structure: EsploraFeeStructure, maxBlockDelay: Int): FeeratePerKB = {
+  def extractFeerate(
+      structure: EsploraFeeStructure,
+      maxBlockDelay: Int
+  ): FeeratePerKB = {
     val belowLimit = structure.filterKeys(_.toInt <= maxBlockDelay).values
     FeeratePerKB(belowLimit.min.sat * 1000L)
   }
@@ -107,13 +137,17 @@ class EsploraFeeProvider(val url: String) extends FeeRatesProvider {
 
 // BitGo
 
-case class BitGoFeeRateStructure(feeByBlockTarget: Map[String, Long], feePerKb: Long)
+case class BitGoFeeRateStructure(
+    feeByBlockTarget: Map[String, Long],
+    feePerKb: Long
+)
 
 object BitgoFeeProvider extends FeeRatesProvider {
   val url = "https://www.bitgo.com/api/v2/btc/tx/fee"
 
   def provide: FeeratesPerKB = {
-    val structure = to[BitGoFeeRateStructure](LNParams.connectionProvider.get(url).string)
+    val structure =
+      to[BitGoFeeRateStructure](LNParams.connectionProvider.get(url).string)
 
     FeeratesPerKB(
       mempoolMinFee = extractFeerate(structure, 1008),
@@ -130,8 +164,12 @@ object BitgoFeeProvider extends FeeRatesProvider {
 
   // first we keep only fee ranges with a max block delay below the limit
   // out of all the remaining fee ranges, we select the one with the minimum higher bound
-  def extractFeerate(structure: BitGoFeeRateStructure, maxBlockDelay: Int): FeeratePerKB = {
-    val belowLimit = structure.feeByBlockTarget.filterKeys(_.toInt <= maxBlockDelay).values
+  def extractFeerate(
+      structure: BitGoFeeRateStructure,
+      maxBlockDelay: Int
+  ): FeeratePerKB = {
+    val belowLimit =
+      structure.feeByBlockTarget.filterKeys(_.toInt <= maxBlockDelay).values
     FeeratePerKB(belowLimit.min.sat)
   }
 }

@@ -1,12 +1,12 @@
 package immortan.sqlite
 
 import java.sql.ResultSet
+import scala.annotation.nowarn
 
 import immortan.crypto.Tools.Bytes
 import scodec.bits.ByteVector
 
 import scala.util.Try
-
 
 trait RichCursor extends Iterable[RichCursor] {
   def byteVec(key: String): ByteVector = ByteVector view bytes(key)
@@ -31,11 +31,14 @@ trait RichCursor extends Iterable[RichCursor] {
 }
 
 case class RichCursorSQLiteGeneral(rs: ResultSet) extends RichCursor { me =>
-  def iterable[T](transform: RichCursor => T): Iterable[T] = try map(transform) finally rs.close
+  def iterable[T](transform: RichCursor => T): Iterable[T] = try map(transform)
+  finally rs.close
 
-  def set[T](transform: RichCursor => T): Set[T] = try map(transform).toSet finally rs.close
+  def set[T](transform: RichCursor => T): Set[T] = try map(transform).toSet
+  finally rs.close
 
-  def headTry[T](fun: RichCursor => T): Try[T] = try Try(fun apply head) finally rs.close
+  def headTry[T](fun: RichCursor => T): Try[T] = try Try(fun apply head)
+  finally rs.close
 
   def bytes(key: String): Bytes = rs.getBytes(key)
 
@@ -49,6 +52,7 @@ case class RichCursorSQLiteGeneral(rs: ResultSet) extends RichCursor { me =>
 
   def int(pos: Int): Int = rs.getInt(pos + 1)
 
+  @nowarn
   def iterator: Iterator[RichCursor] =
     new Iterator[RichCursor] {
       def hasNext: Boolean = rs.next

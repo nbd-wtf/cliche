@@ -7,8 +7,12 @@ import scodec.bits.ByteVector
 import scodec.codecs._
 import scodec.{Codec, Err}
 
-
-case class OnionRoutingPacket(version: Int, publicKey: ByteVector, payload: ByteVector, hmac: ByteVector32)
+case class OnionRoutingPacket(
+    version: Int,
+    publicKey: ByteVector,
+    payload: ByteVector,
+    hmac: ByteVector32
+)
 
 object OnionRoutingCodecs {
 
@@ -21,8 +25,8 @@ object OnionRoutingCodecs {
     // @formatter:on
   }
 
-  def onionRoutingPacketCodec(payloadLength: Int): Codec[OnionRoutingPacket] = (
-    ("version" | uint8) ::
+  def onionRoutingPacketCodec(payloadLength: Int): Codec[OnionRoutingPacket] =
+    (("version" | uint8) ::
       ("publicKey" | bytes(33)) ::
       ("onionPayload" | bytes(payloadLength)) ::
       ("hmac" | bytes32)).as[OnionRoutingPacket]

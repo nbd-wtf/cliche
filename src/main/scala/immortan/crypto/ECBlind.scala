@@ -9,29 +9,46 @@ import immortan.crypto.Tools.Bytes
 import org.bouncycastle.math.ec.ECPoint
 import scodec.bits.ByteVector
 
+case class BlindMemo(
+    params: List[BlindParam],
+    clearTokens: List[BigInteger],
+    key: String
+) {
+  def makeBlindTokens: Seq[String] = params zip clearTokens map {
+    case (param, token) => param.blind(token).toString
+  }
 
-case class BlindMemo(params: List[BlindParam], clearTokens: List[BigInteger], key: String) {
-  def makeBlindTokens: Seq[String] = params zip clearTokens map { case (param, token) => param.blind(token).toString }
-
-  def makeClearSigs(blindSigs: BigInteger*): Seq[BigInteger] = params zip blindSigs map { case (param, sig) => param unblind sig }
+  def makeClearSigs(blindSigs: BigInteger*): Seq[BigInteger] =
+    params zip blindSigs map { case (param, sig) => param unblind sig }
 
   type ClearPointTokenSig = (String, String, String)
 
   def packEverything(clearSigs: BigInteger*): Seq[ClearPointTokenSig] = {
     val clearSigStrings = for (clearSig <- clearSigs) yield clearSig.toString
-    val clearTokenStrings = for (clearToken <- clearTokens) yield clearToken.toString
-    val blindPoints = for (param <- params) yield ByteVector.view(param.point).toHex
+    val clearTokenStrings =
+      for (clearToken <- clearTokens) yield clearToken.toString
+    val blindPoints =
+      for (param <- params) yield ByteVector.view(param.point).toHex
     (blindPoints, clearTokenStrings, clearSigStrings).zipped.toList
   }
 }
 
 // We blind a token but unblind it's signature
-case class BlindParam(point: Bytes, a: BigInteger, b: BigInteger, c: BigInteger, bInv: BigInteger) {
-  def blind(msg: BigInteger): BigInteger = b.multiply(keyBigInt mod getN).multiply(msg).add(a).mod(getN)
+case class BlindParam(
+    point: Bytes,
+    a: BigInteger,
+    b: BigInteger,
+    c: BigInteger,
+    bInv: BigInteger
+) {
+  def blind(msg: BigInteger): BigInteger =
+    b.multiply(keyBigInt mod getN).multiply(msg).add(a).mod(getN)
 
-  def keyBigInt: BigInteger = getCurve.decodePoint(point).getAffineXCoord.toBigInteger
+  def keyBigInt: BigInteger =
+    getCurve.decodePoint(point).getAffineXCoord.toBigInteger
 
-  def unblind(sigHat: BigInteger): BigInteger = bInv.multiply(sigHat).add(c).mod(getN)
+  def unblind(sigHat: BigInteger): BigInteger =
+    bInv.multiply(sigHat).add(c).mod(getN)
 }
 
 // As seen on http://arxiv.org/pdf/1304.2094.pdf
@@ -49,8 +66,10 @@ class ECBlind(signerQ: ECPoint, signerR: ECPoint) {
 
     val bInv: BigInteger = b.modInverse(getN)
     val abInvQ: ECPoint = signerQ.multiply(a.multiply(bInv) mod getN)
-    val blindF: ECPoint = signerR.multiply(bInv).add(abInvQ).add(getG multiply c).normalize
-    if (blindF.getAffineXCoord.isZero | blindF.getAffineYCoord.isZero) makeParams
+    val blindF: ECPoint =
+      signerR.multiply(bInv).add(abInvQ).add(getG multiply c).normalize
+    if (blindF.getAffineXCoord.isZero | blindF.getAffineYCoord.isZero)
+      makeParams
     else BlindParam(blindF.getEncoded(true), a, b, c, bInv)
   }
 }
@@ -59,10 +78,18 @@ class ECBlind(signerQ: ECPoint, signerR: ECPoint) {
 class ECBlindSign(masterPriv: BigInteger) {
   val masterPrivECKey: PrivateKey = PrivateKey(masterPriv)
 
-  def blindSign(msg: BigInteger, k: BigInteger): BigInteger = masterPriv.multiply(msg).add(k).mod(getN)
+  def blindSign(msg: BigInteger, k: BigInteger): BigInteger =
+    masterPriv.multiply(msg).add(k).mod(getN)
 
-  def verifyClearSig(clearMsg: BigInteger, clearSignature: BigInteger, point: ECPoint): Boolean = {
-    val rm: BigInteger = point.getAffineXCoord.toBigInteger.mod(getN).multiply(clearMsg).mod(getN)
-    getG.multiply(clearSignature) == masterPrivECKey.publicKey.ecpoint.multiply(rm).add(point)
+  def verifyClearSig(
+      clearMsg: BigInteger,
+      clearSignature: BigInteger,
+      point: ECPoint
+  ): Boolean = {
+    val rm: BigInteger =
+      point.getAffineXCoord.toBigInteger.mod(getN).multiply(clearMsg).mod(getN)
+    getG.multiply(clearSignature) == masterPrivECKey.publicKey.ecpoint
+      .multiply(rm)
+      .add(point)
   }
 }

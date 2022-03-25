@@ -22,7 +22,6 @@ import org.bouncycastle.crypto.macs.HMac
 import org.bouncycastle.crypto.params.KeyParameter
 import scodec.bits.ByteVector
 
-
 trait Mac32 {
 
   def mac(message: ByteVector): ByteVector32
@@ -32,9 +31,11 @@ trait Mac32 {
 
 case class Hmac256(key: ByteVector) extends Mac32 {
 
-  override def mac(message: ByteVector): ByteVector32 = Mac32.hmac256(key, message)
+  override def mac(message: ByteVector): ByteVector32 =
+    Mac32.hmac256(key, message)
 
-  override def verify(mac: ByteVector32, message: ByteVector): Boolean = this.mac(message) === mac
+  override def verify(mac: ByteVector32, message: ByteVector): Boolean =
+    this.mac(message) === mac
 }
 
 object Mac32 {

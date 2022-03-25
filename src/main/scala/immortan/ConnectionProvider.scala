@@ -5,7 +5,6 @@ import java.net.{InetSocketAddress, Socket}
 import java.util.concurrent.TimeUnit
 import immortan.crypto.Tools
 
-
 trait ConnectionProvider {
   val proxyAddress: Option[InetSocketAddress]
 
@@ -24,7 +23,8 @@ trait ConnectionProvider {
 }
 
 class ClearnetConnectionProvider extends ConnectionProvider {
-  override val okHttpClient: OkHttpClient = (new OkHttpClient.Builder).connectTimeout(15, TimeUnit.SECONDS).build
+  override val okHttpClient: OkHttpClient =
+    (new OkHttpClient.Builder).connectTimeout(15, TimeUnit.SECONDS).build
 
   override val proxyAddress: Option[InetSocketAddress] = Option.empty
 

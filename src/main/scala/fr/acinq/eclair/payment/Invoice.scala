@@ -46,7 +46,8 @@ trait Invoice {
 
   val features: Features[InvoiceFeature]
 
-  def isExpired(): Boolean = createdAt + relativeExpiry.toSeconds <= System.currentTimeMillis / 1000L
+  def isExpired(): Boolean =
+    createdAt + relativeExpiry.toSeconds <= System.currentTimeMillis / 1000L
 
   def toString: String
 }

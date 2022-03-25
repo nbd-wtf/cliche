@@ -5,7 +5,11 @@ import java.lang.{Integer => JInt}
 import fr.acinq.bitcoin.Crypto.PublicKey
 import fr.acinq.bitcoin.{BlockHeader, ByteVector32}
 import fr.acinq.eclair.blockchain.electrum.db.HeaderDb
-import fr.acinq.eclair.wire.LightningMessageCodecs.{hostedChannelBrandingCodec, swapInStateCodec, trampolineOnCodec}
+import fr.acinq.eclair.wire.LightningMessageCodecs.{
+  hostedChannelBrandingCodec,
+  swapInStateCodec,
+  trampolineOnCodec
+}
 import fr.acinq.eclair.wire.{HostedChannelBranding, SwapInState, TrampolineOn}
 import immortan.crypto.Tools.Bytes
 import immortan.sqlite.SQLiteData._
@@ -17,7 +21,6 @@ import scodec.bits.ByteVector
 import spray.json._
 
 import scala.util.Try
-
 
 object SQLiteData {
   final val LABEL_FORMAT = "label-format"
@@ -45,40 +48,61 @@ class SQLiteData(val db: DBInterface) extends HeaderDb with DataBag {
 
   // StorageFormat
 
-  def putSecret(secret: WalletSecret): Unit = put(LABEL_FORMAT, walletSecretCodec.encode(secret).require.toByteArray)
+  def putSecret(secret: WalletSecret): Unit =
+    put(LABEL_FORMAT, walletSecretCodec.encode(secret).require.toByteArray)
 
-  def tryGetSecret: Try[WalletSecret] = tryGet(LABEL_FORMAT).map(raw => walletSecretCodec.decode(raw.toBitVector).require.value)
+  def tryGetSecret: Try[WalletSecret] = tryGet(LABEL_FORMAT).map(raw =>
+    walletSecretCodec.decode(raw.toBitVector).require.value
+  )
 
   // Fiat rates, fee rates
 
-  def putTrampolineOn(ton: TrampolineOn): Unit = put(LABLEL_TRAMPOLINE_ON, trampolineOnCodec.encode(ton).require.toByteArray)
+  def putTrampolineOn(ton: TrampolineOn): Unit =
+    put(LABLEL_TRAMPOLINE_ON, trampolineOnCodec.encode(ton).require.toByteArray)
 
-  def tryGetTrampolineOn: Try[TrampolineOn] = tryGet(LABLEL_TRAMPOLINE_ON).map(raw => trampolineOnCodec.decode(raw.toBitVector).require.value)
+  def tryGetTrampolineOn: Try[TrampolineOn] =
+    tryGet(LABLEL_TRAMPOLINE_ON).map(raw =>
+      trampolineOnCodec.decode(raw.toBitVector).require.value
+    )
 
-  def putFiatRatesInfo(data: FiatRatesInfo): Unit = put(LABEL_FIAT_RATES, data.toJson.compactPrint getBytes "UTF-8")
+  def putFiatRatesInfo(data: FiatRatesInfo): Unit =
+    put(LABEL_FIAT_RATES, data.toJson.compactPrint getBytes "UTF-8")
 
-  def tryGetFiatRatesInfo: Try[FiatRatesInfo] = tryGet(LABEL_FIAT_RATES).map(SQLiteData.byteVecToString) map to[FiatRatesInfo]
+  def tryGetFiatRatesInfo: Try[FiatRatesInfo] = tryGet(LABEL_FIAT_RATES).map(
+    SQLiteData.byteVecToString
+  ) map to[FiatRatesInfo]
 
-  def putFeeRatesInfo(data: FeeRatesInfo): Unit = put(LABEL_FEE_RATES, data.toJson.compactPrint getBytes "UTF-8")
+  def putFeeRatesInfo(data: FeeRatesInfo): Unit =
+    put(LABEL_FEE_RATES, data.toJson.compactPrint getBytes "UTF-8")
 
-  def tryGetFeeRatesInfo: Try[FeeRatesInfo] = tryGet(LABEL_FEE_RATES).map(SQLiteData.byteVecToString) map to[FeeRatesInfo]
+  def tryGetFeeRatesInfo: Try[FeeRatesInfo] =
+    tryGet(LABEL_FEE_RATES).map(SQLiteData.byteVecToString) map to[FeeRatesInfo]
 
   // Payment reports
 
-  def putReport(paymentHash: ByteVector32, report: String): Unit = put(LABEL_PAYMENT_REPORT_PREFIX + paymentHash.toHex, report getBytes "UTF-8")
+  def putReport(paymentHash: ByteVector32, report: String): Unit = put(
+    LABEL_PAYMENT_REPORT_PREFIX + paymentHash.toHex,
+    report getBytes "UTF-8"
+  )
 
-  def tryGetReport(paymentHash: ByteVector32): Try[String] = tryGet(LABEL_PAYMENT_REPORT_PREFIX + paymentHash.toHex).map(byteVecToString)
+  def tryGetReport(paymentHash: ByteVector32): Try[String] =
+    tryGet(LABEL_PAYMENT_REPORT_PREFIX + paymentHash.toHex).map(byteVecToString)
 
   // HostedChannelBranding
 
   def putBranding(nodeId: PublicKey, branding: HostedChannelBranding): Unit = {
-    val hostedChannelBranding = hostedChannelBrandingCodec.encode(branding).require.toByteArray
+    val hostedChannelBranding =
+      hostedChannelBrandingCodec.encode(branding).require.toByteArray
     put(LABEL_BRANDING_PREFIX + nodeId.toString, hostedChannelBranding)
   }
 
   def tryGetBranding(nodeId: PublicKey): Try[HostedChannelBranding] =
-    tryGet(LABEL_BRANDING_PREFIX + nodeId.toString) map { rawHostedChannelBranding =>
-      hostedChannelBrandingCodec.decode(rawHostedChannelBranding.toBitVector).require.value
+    tryGet(LABEL_BRANDING_PREFIX + nodeId.toString) map {
+      rawHostedChannelBranding =>
+        hostedChannelBrandingCodec
+          .decode(rawHostedChannelBranding.toBitVector)
+          .require
+          .value
     }
 
   // SwapInState
@@ -90,7 +114,10 @@ class SQLiteData(val db: DBInterface) extends HeaderDb with DataBag {
 
   def tryGetSwapInState(nodeId: PublicKey): Try[SwapInStateExt] =
     tryGet(LABEL_SWAP_IN_STATE_PREFIX + nodeId.toString) map { rawSwapInState =>
-      SwapInStateExt(swapInStateCodec.decode(rawSwapInState.toBitVector).require.value, nodeId)
+      SwapInStateExt(
+        swapInStateCodec.decode(rawSwapInState.toBitVector).require.value,
+        nodeId
+      )
     }
 
   // HeadersDb
@@ -101,7 +128,12 @@ class SQLiteData(val db: DBInterface) extends HeaderDb with DataBag {
     db txWrap {
       for (Tuple2(header, idx) <- headers.zipWithIndex) {
         val serialized: Array[Byte] = BlockHeader.write(header).toArray
-        db.change(addHeaderSqlPQ, atHeight + idx: JInt, header.hash.toHex, serialized)
+        db.change(
+          addHeaderSqlPQ,
+          atHeight + idx: JInt,
+          header.hash.toHex,
+          serialized
+        )
       }
     }
 
@@ -109,27 +141,37 @@ class SQLiteData(val db: DBInterface) extends HeaderDb with DataBag {
   }
 
   override def getHeader(height: Int): Option[BlockHeader] =
-    db.select(ElectrumHeadersTable.selectByHeightSql, height.toString).headTry { rc =>
-      BlockHeader.read(rc bytes ElectrumHeadersTable.header)
-    }.toOption
+    db.select(ElectrumHeadersTable.selectByHeightSql, height.toString)
+      .headTry { rc =>
+        BlockHeader.read(rc bytes ElectrumHeadersTable.header)
+      }
+      .toOption
 
   // Only used in testing currently
   override def getHeader(blockHash: ByteVector32): Option[HeightAndHeader] =
-    db.select(ElectrumHeadersTable.selectByBlockHashSql, blockHash.toHex).headTry { rc =>
-      val header = BlockHeader.read(rc bytes ElectrumHeadersTable.header)
-      val height = rc int ElectrumHeadersTable.height
-      (height, header)
-    }.toOption
+    db.select(ElectrumHeadersTable.selectByBlockHashSql, blockHash.toHex)
+      .headTry { rc =>
+        val header = BlockHeader.read(rc bytes ElectrumHeadersTable.header)
+        val height = rc int ElectrumHeadersTable.height
+        (height, header)
+      }
+      .toOption
 
   override def getHeaders(startHeight: Int, maxCount: Int): Seq[BlockHeader] =
-    db.select(ElectrumHeadersTable.selectHeadersSql, startHeight.toString, maxCount.toString).iterable { rc =>
+    db.select(
+      ElectrumHeadersTable.selectHeadersSql,
+      startHeight.toString,
+      maxCount.toString
+    ).iterable { rc =>
       BlockHeader.read(rc bytes ElectrumHeadersTable.header)
     }.toList
 
   override def getTip: Option[HeightAndHeader] =
-    db.select(ElectrumHeadersTable.selectTipSql).headTry { rc =>
-      val header = BlockHeader.read(rc bytes ElectrumHeadersTable.header)
-      val height = rc int ElectrumHeadersTable.height
-      (height, header)
-    }.toOption
+    db.select(ElectrumHeadersTable.selectTipSql)
+      .headTry { rc =>
+        val header = BlockHeader.read(rc bytes ElectrumHeadersTable.header)
+        val height = rc int ElectrumHeadersTable.height
+        (height, header)
+      }
+      .toOption
 }

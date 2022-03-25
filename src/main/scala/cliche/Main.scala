@@ -244,11 +244,11 @@ object Main extends App {
     ElectrumClientPool.loadFromChainHash = {
       case Block.LivenetGenesisBlock.hash =>
         ElectrumClientPool.readServerAddresses(
-          Source.fromResource("servers_mainnet.json")
+          getClass.getResourceAsStream("servers_mainnet.json")
         )
       case Block.TestnetGenesisBlock.hash =>
         ElectrumClientPool.readServerAddresses(
-          Source.fromResource("servers_testnet.json")
+          getClass.getResourceAsStream("servers_testnet.json")
         )
       case _ => throw new RuntimeException
     }
@@ -256,11 +256,11 @@ object Main extends App {
     CheckPoint.loadFromChainHash = {
       case Block.LivenetGenesisBlock.hash =>
         CheckPoint.load(
-          Source.fromResource("checkpoints_mainnet.json")
+          getClass.getResourceAsStream("checkpoints_mainnet.json")
         )
       case Block.TestnetGenesisBlock.hash =>
         CheckPoint.load(
-          Source.fromResource("checkpoints_testnet.json")
+          getClass.getResourceAsStream("checkpoints_testnet.json")
         )
       case _ => throw new RuntimeException
     }

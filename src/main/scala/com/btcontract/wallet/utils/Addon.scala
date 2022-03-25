@@ -1,6 +1,5 @@
 package com.btcontract.wallet.utils
 
-
 object Addon {
   val MINIMIZED = "state-minimized"
   val ACTIVE = "state-active"
@@ -34,4 +33,9 @@ case class UsedAddons(addons: List[AddonData] = Nil) { me =>
   }
 }
 
-case class BasicAddon(authToken: Option[String], supportEmail: String, description: String, domain: String) extends AddonData
+case class BasicAddon(
+    authToken: Option[String],
+    supportEmail: String,
+    description: String,
+    domain: String
+) extends AddonData

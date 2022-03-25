@@ -7,7 +7,6 @@ import scodec.bits.ByteVector
 
 import scala.concurrent.Future
 
-
 object EclairWallet {
   final val OPT_IN_FULL_RBF = TxIn.SEQUENCE_FINAL - 2
   final val MAX_RECEIVE_ADDRESSES = 10
@@ -24,19 +23,46 @@ trait EclairWallet {
 
   def getReceiveAddresses: Future[GetCurrentReceiveAddressesResponse]
 
-  def makeFundingTx(pubkeyScript: ByteVector, amount: Satoshi, feeRatePerKw: FeeratePerKw): Future[GenerateTxResponse]
+  def makeFundingTx(
+      pubkeyScript: ByteVector,
+      amount: Satoshi,
+      feeRatePerKw: FeeratePerKw
+  ): Future[GenerateTxResponse]
 
-  def sendPreimageBroadcast(preimages: Set[ByteVector32], pubKeyScript: ByteVector, feeRatePerKw: FeeratePerKw): Future[GenerateTxResponse]
+  def sendPreimageBroadcast(
+      preimages: Set[ByteVector32],
+      pubKeyScript: ByteVector,
+      feeRatePerKw: FeeratePerKw
+  ): Future[GenerateTxResponse]
 
-  def makeBatchTx(scriptToAmount: Map[ByteVector, Satoshi], feeRatePerKw: FeeratePerKw): Future[GenerateTxResponse]
+  def makeBatchTx(
+      scriptToAmount: Map[ByteVector, Satoshi],
+      feeRatePerKw: FeeratePerKw
+  ): Future[GenerateTxResponse]
 
-  def makeTx(pubKeyScript: ByteVector, amount: Satoshi, prevScriptToAmount: Map[ByteVector, Satoshi], feeRatePerKw: FeeratePerKw): Future[GenerateTxResponse]
+  def makeTx(
+      pubKeyScript: ByteVector,
+      amount: Satoshi,
+      prevScriptToAmount: Map[ByteVector, Satoshi],
+      feeRatePerKw: FeeratePerKw
+  ): Future[GenerateTxResponse]
 
-  def makeCPFP(fromOutpoints: Set[OutPoint], pubKeyScript: ByteVector, feeRatePerKw: FeeratePerKw): Future[GenerateTxResponse]
+  def makeCPFP(
+      fromOutpoints: Set[OutPoint],
+      pubKeyScript: ByteVector,
+      feeRatePerKw: FeeratePerKw
+  ): Future[GenerateTxResponse]
 
-  def makeRBFBump(tx: Transaction, feeRatePerKw: FeeratePerKw): Future[RBFResponse]
+  def makeRBFBump(
+      tx: Transaction,
+      feeRatePerKw: FeeratePerKw
+  ): Future[RBFResponse]
 
-  def makeRBFReroute(tx: Transaction, feeRatePerKw: FeeratePerKw, pubKeyScript: ByteVector): Future[RBFResponse]
+  def makeRBFReroute(
+      tx: Transaction,
+      feeRatePerKw: FeeratePerKw,
+      pubKeyScript: ByteVector
+  ): Future[RBFResponse]
 
   def provideExcludedOutpoints(excludedOutPoints: List[OutPoint] = Nil): Unit
 

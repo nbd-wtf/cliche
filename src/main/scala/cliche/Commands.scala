@@ -65,7 +65,7 @@ object Commands {
         case _                        => UnknownCommand()
       }
     } catch {
-      case _ => NoCommand()
+      case _: Throwable => NoCommand()
     }
   }
 

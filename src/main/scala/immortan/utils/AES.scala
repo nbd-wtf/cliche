@@ -5,7 +5,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.{IvParameterSpec, SecretKeySpec}
 import scodec.bits.ByteVector
 
-
 object AES {
   final val ivLength = 16
 

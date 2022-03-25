@@ -8,10 +8,18 @@ class DBInterfaceSQLiteAndroidMisc(context: Connection) {
   val base: Connection = context
 
   TxTable.createStatements.foreach(s => base.prepareStatement(s).execute())
-  ChannelTxFeesTable.createStatements.foreach(s => base.prepareStatement(s).execute())
-  ElectrumHeadersTable.createStatements.foreach(s => base.prepareStatement(s).execute())
-  ChainWalletTable.createStatements.foreach(s => base.prepareStatement(s).execute())
-  LNUrlPayTable.createStatements.foreach(s => base.prepareStatement(s).execute())
+  ChannelTxFeesTable.createStatements.foreach(s =>
+    base.prepareStatement(s).execute()
+  )
+  ElectrumHeadersTable.createStatements.foreach(s =>
+    base.prepareStatement(s).execute()
+  )
+  ChainWalletTable.createStatements.foreach(s =>
+    base.prepareStatement(s).execute()
+  )
+  LNUrlPayTable.createStatements.foreach(s =>
+    base.prepareStatement(s).execute()
+  )
   PaymentTable.createStatements.foreach(s => base.prepareStatement(s).execute())
   RelayTable.createStatements.foreach(s => base.prepareStatement(s).execute())
   DataTable.createStatements.foreach(s => base.prepareStatement(s).execute())

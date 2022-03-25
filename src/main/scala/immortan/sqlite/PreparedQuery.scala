@@ -5,7 +5,6 @@ import java.sql.PreparedStatement
 
 import immortan.crypto.Tools.Bytes
 
-
 trait PreparedQuery {
   def bound(params: Object*): PreparedQuery
 
@@ -16,7 +15,8 @@ trait PreparedQuery {
   def close: Unit
 }
 
-case class PreparedQuerySQLiteGeneral(stmt: PreparedStatement) extends PreparedQuery { me =>
+case class PreparedQuerySQLiteGeneral(stmt: PreparedStatement)
+    extends PreparedQuery { me =>
 
   def bound(params: Object*): PreparedQuery = {
     // Mutable, but local and saves one iteration
@@ -24,12 +24,16 @@ case class PreparedQuerySQLiteGeneral(stmt: PreparedStatement) extends PreparedQ
 
     for (queryParameter <- params) {
       queryParameter match {
-        case queryParameter: JDouble => stmt.setDouble(positionIndex, queryParameter)
-        case queryParameter: String => stmt.setString(positionIndex, queryParameter)
-        case queryParameter: Bytes => stmt.setBytes(positionIndex, queryParameter)
-        case queryParameter: JLong => stmt.setLong(positionIndex, queryParameter)
+        case queryParameter: JDouble =>
+          stmt.setDouble(positionIndex, queryParameter)
+        case queryParameter: String =>
+          stmt.setString(positionIndex, queryParameter)
+        case queryParameter: Bytes =>
+          stmt.setBytes(positionIndex, queryParameter)
+        case queryParameter: JLong =>
+          stmt.setLong(positionIndex, queryParameter)
         case queryParameter: JInt => stmt.setInt(positionIndex, queryParameter)
-        case _ => throw new RuntimeException
+        case _                    => throw new RuntimeException
       }
 
       positionIndex += 1

@@ -5,7 +5,6 @@ import immortan.crypto.Tools._
 
 import scala.concurrent.duration._
 
-
 class LoggingSupervisor(childProps: Props, childName: String) extends Actor {
 
   import immortan.LNParams.logBag
@@ -14,7 +13,11 @@ class LoggingSupervisor(childProps: Props, childName: String) extends Actor {
 
   override def receive: Receive = { case anything => child forward anything }
 
-  override val supervisorStrategy: OneForOneStrategy = OneForOneStrategy(loggingEnabled = false, maxNrOfRetries = 100, withinTimeRange = 1.minute) {
+  override val supervisorStrategy: OneForOneStrategy = OneForOneStrategy(
+    loggingEnabled = false,
+    maxNrOfRetries = 100,
+    withinTimeRange = 1.minute
+  ) {
     // We allow at most <maxNrOfRetries> within <withinTimeRange>, otherwise the child actor is not restarted (this avoids child restart loops)
 
     case childError =>

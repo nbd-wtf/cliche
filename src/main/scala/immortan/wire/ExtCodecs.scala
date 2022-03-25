@@ -8,8 +8,11 @@ import fr.acinq.eclair.wire.LightningMessageCodecs._
 import immortan._
 import scodec.codecs._
 
-
-case class HostedState(nodeId1: PublicKey, nodeId2: PublicKey, lastCrossSignedState: LastCrossSignedState)
+case class HostedState(
+    nodeId1: PublicKey,
+    nodeId2: PublicKey,
+    lastCrossSignedState: LastCrossSignedState
+)
 
 object ExtCodecs {
   val compressedByteVecCodec = {
@@ -25,7 +28,7 @@ object ExtCodecs {
 
   val lightningNodeKeysCodec = {
     (extendedPrivateKeyCodec withContext "master") ::
-    (extendedPrivateKeyCodec withContext "extendedNodeKey") ::
+      (extendedPrivateKeyCodec withContext "extendedNodeKey") ::
       (privateKey withContext "hashingKey")
   }.as[LightningNodeKeys]
 

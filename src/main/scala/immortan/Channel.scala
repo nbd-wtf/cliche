@@ -17,7 +17,6 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.Failure
 
-
 object Channel {
   final val WAIT_FOR_INIT = 0
   final val WAIT_FOR_ACCEPT = 1
@@ -27,46 +26,60 @@ object Channel {
   final val OPEN = 5
 
   // Single stacking thread for all channels, must be used when asking channels for pending payments to avoid race conditions
-  implicit val channelContext: ExecutionContextExecutor = scala.concurrent.ExecutionContext fromExecutor Executors.newSingleThreadExecutor
+  implicit val channelContext: ExecutionContextExecutor =
+    scala.concurrent.ExecutionContext fromExecutor Executors.newSingleThreadExecutor
 
-  def load(listeners: Set[ChannelListener], bag: ChannelBag): Map[ByteVector32, Channel] = bag.all.map {
-    case data: HasNormalCommitments => data.channelId -> ChannelNormal.make(listeners, data, bag)
-    case data: HostedCommits => data.channelId -> ChannelHosted.make(listeners, data, bag)
+  def load(
+      listeners: Set[ChannelListener],
+      bag: ChannelBag
+  ): Map[ByteVector32, Channel] = bag.all.map {
+    case data: HasNormalCommitments =>
+      data.channelId -> ChannelNormal.make(listeners, data, bag)
+    case data: HostedCommits =>
+      data.channelId -> ChannelHosted.make(listeners, data, bag)
     case _ => throw new RuntimeException
   }.toMap
 
-  def chanAndCommitsOpt(chan: Channel): Option[ChanAndCommits] = chan.data match {
-    case data: HasNormalCommitments => ChanAndCommits(chan, data.commitments).asSome
-    case data: HostedCommits => ChanAndCommits(chan, data).asSome
-    case _ => None
-  }
+  def chanAndCommitsOpt(chan: Channel): Option[ChanAndCommits] =
+    chan.data match {
+      case data: HasNormalCommitments =>
+        ChanAndCommits(chan, data.commitments).asSome
+      case data: HostedCommits => ChanAndCommits(chan, data).asSome
+      case _                   => None
+    }
 
   def isOperational(chan: Channel): Boolean = chan.data match {
-    case data: DATA_NORMAL => data.localShutdown.isEmpty && data.remoteShutdown.isEmpty
+    case data: DATA_NORMAL =>
+      data.localShutdown.isEmpty && data.remoteShutdown.isEmpty
     case hostedCommits: HostedCommits => hostedCommits.error.isEmpty
-    case _ => false
+    case _                            => false
   }
 
   def isWaiting(chan: Channel): Boolean = chan.data match {
     case _: DATA_WAIT_FOR_FUNDING_CONFIRMED => true
-    case _: DATA_WAIT_FOR_FUNDING_LOCKED => true
-    case _ => false
+    case _: DATA_WAIT_FOR_FUNDING_LOCKED    => true
+    case _                                  => false
   }
 
-  def isOperationalOrWaiting(chan: Channel): Boolean = isOperational(chan) || isWaiting(chan)
+  def isOperationalOrWaiting(chan: Channel): Boolean =
+    isOperational(chan) || isWaiting(chan)
 
-  def isOperationalAndOpen(chan: Channel): Boolean = isOperational(chan) && OPEN == chan.state
+  def isOperationalAndOpen(chan: Channel): Boolean =
+    isOperational(chan) && OPEN == chan.state
 
-  def isOperationalAndSleeping(chan: Channel): Boolean = isOperational(chan) && SLEEPING == chan.state
+  def isOperationalAndSleeping(chan: Channel): Boolean =
+    isOperational(chan) && SLEEPING == chan.state
 
-  def totalBalance(chans: Iterable[Channel] = Nil): MilliSatoshi = chans.filter(isOperationalOrWaiting).map(_.data.ourBalance).sum
+  def totalBalance(chans: Iterable[Channel] = Nil): MilliSatoshi =
+    chans.filter(isOperationalOrWaiting).map(_.data.ourBalance).sum
 }
 
 trait Channel extends StateMachine[ChannelData] with CanBeRepliedTo { me =>
-  def process(changeMsg: Any): Unit = Future(me doProcess changeMsg).onComplete {
-    case Failure(reason) => events onException Tuple3(reason, me, data)
-    case _ => // Do nothing
-  }
+  def process(changeMsg: Any): Unit =
+    Future(me doProcess changeMsg).onComplete {
+      case Failure(reason) => events onException Tuple3(reason, me, data)
+      case _               => // Do nothing
+    }
 
   def SEND(msg: LightningMessage*): Unit
 
@@ -79,39 +92,70 @@ trait Channel extends StateMachine[ChannelData] with CanBeRepliedTo { me =>
     events.onBecome(trans)
   }
 
-  def StoreBecomeSend(data1: PersistentChannelData, state1: Int, lnMessage: LightningMessage*): Unit = {
+  def StoreBecomeSend(
+      data1: PersistentChannelData,
+      state1: Int,
+      lnMessage: LightningMessage*
+  ): Unit = {
     // Storing first to ensure we retain an updated data before revealing it if anything goes wrong
 
     STORE(data1)
     BECOME(data1, state1)
-    SEND(lnMessage:_*)
+    SEND(lnMessage: _*)
   }
 
   var listeners = Set.empty[ChannelListener]
 
   val events: ChannelListener = new ChannelListener {
-    override def onException: PartialFunction[ChannelListener.Malfunction, Unit] = { case tuple => for (lst <- listeners if lst.onException isDefinedAt tuple) lst onException tuple }
-    override def onBecome: PartialFunction[ChannelListener.Transition, Unit] = { case tuple => for (lst <- listeners if lst.onBecome isDefinedAt tuple) lst onBecome tuple }
-    override def addRejectedRemotely(reason: RemoteReject): Unit = for (lst <- listeners) lst.addRejectedRemotely(reason)
-    override def addRejectedLocally(reason: LocalReject): Unit = for (lst <- listeners) lst.addRejectedLocally(reason)
-    override def fulfillReceived(fulfill: RemoteFulfill): Unit = for (lst <- listeners) lst.fulfillReceived(fulfill)
-    override def addReceived(add: UpdateAddHtlcExt): Unit = for (lst <- listeners) lst.addReceived(add)
-    override def notifyResolvers: Unit = for (lst <- listeners) lst.notifyResolvers
+    override def onException
+        : PartialFunction[ChannelListener.Malfunction, Unit] = { case tuple =>
+      for (lst <- listeners if lst.onException isDefinedAt tuple)
+        lst onException tuple
+    }
+    override def onBecome: PartialFunction[ChannelListener.Transition, Unit] = {
+      case tuple =>
+        for (lst <- listeners if lst.onBecome isDefinedAt tuple)
+          lst onBecome tuple
+    }
+    override def addRejectedRemotely(reason: RemoteReject): Unit = for (
+      lst <- listeners
+    ) lst.addRejectedRemotely(reason)
+    override def addRejectedLocally(reason: LocalReject): Unit = for (
+      lst <- listeners
+    ) lst.addRejectedLocally(reason)
+    override def fulfillReceived(fulfill: RemoteFulfill): Unit = for (
+      lst <- listeners
+    ) lst.fulfillReceived(fulfill)
+    override def addReceived(add: UpdateAddHtlcExt): Unit = for (
+      lst <- listeners
+    ) lst.addReceived(add)
+    override def notifyResolvers: Unit = for (lst <- listeners)
+      lst.notifyResolvers
   }
 
-  val receiver: ActorRef = LNParams.system actorOf Props(new ActorEventsReceiver)
+  val receiver: ActorRef =
+    LNParams.system actorOf Props(new ActorEventsReceiver)
 
   class ActorEventsReceiver extends Actor {
-    context.system.eventStream.subscribe(channel = classOf[CurrentBlockCount], subscriber = self)
+    context.system.eventStream
+      .subscribe(channel = classOf[CurrentBlockCount], subscriber = self)
 
-    override def receive: Receive = main(lastSeenBlockCount = None, useDelay = true)
+    override def receive: Receive =
+      main(lastSeenBlockCount = None, useDelay = true)
 
-    def main(lastSeenBlockCount: Option[CurrentBlockCount], useDelay: Boolean): Receive = {
-      case currentBlockCount: CurrentBlockCount if lastSeenBlockCount.isEmpty && useDelay =>
-        context.system.scheduler.scheduleOnce(10.seconds)(self ! "propagate")(LNParams.ec)
+    def main(
+        lastSeenBlockCount: Option[CurrentBlockCount],
+        useDelay: Boolean
+    ): Receive = {
+      case currentBlockCount: CurrentBlockCount
+          if lastSeenBlockCount.isEmpty && useDelay =>
+        context.system.scheduler.scheduleOnce(10.seconds)(self ! "propagate")(
+          LNParams.ec
+        )
         context become main(currentBlockCount.asSome, useDelay = true)
 
-      case currentBlockCount: CurrentBlockCount if lastSeenBlockCount.isDefined && useDelay =>
+      case currentBlockCount: CurrentBlockCount
+          if lastSeenBlockCount.isDefined && useDelay =>
         // We may get another chain tip while delaying a current one: store a new one then
         context become main(currentBlockCount.asSome, useDelay = true)
 
@@ -143,4 +187,7 @@ trait ChannelListener {
 }
 
 case class ChanAndCommits(chan: Channel, commits: Commitments)
-case class CommitsAndMax(commits: Seq[ChanAndCommits], maxReceivable: MilliSatoshi)
+case class CommitsAndMax(
+    commits: Seq[ChanAndCommits],
+    maxReceivable: MilliSatoshi
+)

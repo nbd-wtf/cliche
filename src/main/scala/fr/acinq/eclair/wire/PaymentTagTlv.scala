@@ -6,8 +6,11 @@ import scodec._
 import scodec.bits.ByteVector
 import scodec.codecs._
 
-
-case class FullPaymentTag(paymentHash: ByteVector32, paymentSecret: ByteVector32, tag: Int)
+case class FullPaymentTag(
+    paymentHash: ByteVector32,
+    paymentSecret: ByteVector32,
+    tag: Int
+)
 
 case class ShortPaymentTag(paymentSecret: ByteVector32, tag: Int)
 
@@ -25,9 +28,12 @@ object PaymentTagTlv {
       (int32 withContext "tag")
   }.as[ShortPaymentTag]
 
-  private val encryptedPaymentSecretCodec = variableSizeBytesLong(varintoverflow, bytes).as[EncryptedPaymentSecret]
+  private val encryptedPaymentSecretCodec =
+    variableSizeBytesLong(varintoverflow, bytes).as[EncryptedPaymentSecret]
 
-  private val discriminator = discriminated[EncryptedPaymentSecret].by(varint).typecase(TlvStream.paymentTag, encryptedPaymentSecretCodec)
+  private val discriminator = discriminated[EncryptedPaymentSecret]
+    .by(varint)
+    .typecase(TlvStream.paymentTag, encryptedPaymentSecretCodec)
 
   val codec: Codec[EncryptedSecretStream] = TlvCodecs.tlvStream(discriminator)
 }

@@ -6,7 +6,6 @@ import fr.acinq.eclair.wire.CommonCodecs._
 import scodec.Codec
 import scodec.codecs.{discriminated, list, variableSizeBytesLong}
 
-
 /** Tlv types used inside Init messages. */
 sealed trait InitTlv extends Tlv
 
@@ -21,10 +20,13 @@ object InitTlvCodecs {
 
   import InitTlv._
 
-  private val networks: Codec[Networks] = variableSizeBytesLong(varintoverflow, list(bytes32)).as[Networks]
+  private val networks: Codec[Networks] =
+    variableSizeBytesLong(varintoverflow, list(bytes32)).as[Networks]
 
-  val initTlvCodec: Codec[TlvStream[InitTlv]] = TlvCodecs.tlvStream(discriminated[InitTlv].by(varint)
-    .typecase(UInt64(1), networks)
+  val initTlvCodec: Codec[TlvStream[InitTlv]] = TlvCodecs.tlvStream(
+    discriminated[InitTlv]
+      .by(varint)
+      .typecase(UInt64(1), networks)
   )
 
 }

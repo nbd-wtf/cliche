@@ -5,7 +5,6 @@ import fr.acinq.eclair.wire.CommonCodecs.{varint, varintoverflow}
 import scodec.Codec
 import scodec.codecs._
 
-
 sealed trait QueryChannelRangeTlv extends Tlv
 
 object QueryChannelRangeTlv {
@@ -23,9 +22,15 @@ object QueryChannelRangeTlv {
     def wantChecksums(flag: Long) = (flag & WANT_CHECKSUMS) != 0
   }
 
-  val queryFlagsCodec: Codec[QueryFlags] = Codec(("flag" | varintoverflow)).as[QueryFlags]
+  val queryFlagsCodec: Codec[QueryFlags] =
+    Codec(("flag" | varintoverflow)).as[QueryFlags]
 
-  val codec: Codec[TlvStream[QueryChannelRangeTlv]] = TlvCodecs.tlvStream(discriminated.by(varint)
-    .typecase(UInt64(1), variableSizeBytesLong(varintoverflow, queryFlagsCodec))
+  val codec: Codec[TlvStream[QueryChannelRangeTlv]] = TlvCodecs.tlvStream(
+    discriminated
+      .by(varint)
+      .typecase(
+        UInt64(1),
+        variableSizeBytesLong(varintoverflow, queryFlagsCodec)
+      )
   )
 }

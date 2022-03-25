@@ -3,7 +3,6 @@ package immortan.utils
 import immortan.crypto.Tools.{Any2Some, none}
 import rx.lang.scala.Subscription
 
-
 abstract class ThrottledWork[T, V] {
   private var lastWork: Option[T] = None
   private var subscription: Option[Subscription] = None
@@ -44,7 +43,8 @@ abstract class ThrottledWork[T, V] {
   def replaceWork(data: T): Unit =
     if (subscription.isEmpty) {
       // Previous work has already finished or was interrupted or has never been started
-      subscription = work(data).subscribe(res => process(data, res), error).asSome
+      subscription =
+        work(data).subscribe(res => process(data, res), error).asSome
     } else {
       // Current work has not finished yet
       // disconnect subscription and replace
