@@ -22,6 +22,7 @@ import scodec.bits.ByteVector
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
+import scala.annotation.nowarn
 import scala.util.Try
 
 object ChannelNormal {
@@ -65,6 +66,7 @@ abstract class ChannelNormal(bag: ChannelBag) extends Channel {
       )
   }
 
+  @nowarn
   def doProcess(change: Any): Unit =
     Tuple3(data, change, state) match {
 
@@ -837,6 +839,8 @@ abstract class ChannelNormal(bag: ChannelBag) extends Channel {
           )
 
           val proposed = ClosingTxProposed(closingTx.tx, closingSignedMsg)
+
+          @nowarn
           val closingTxProposed1 = negs.closingTxProposed match {
             case prev :+ current => prev :+ (current :+ proposed) map identity
           }

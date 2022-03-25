@@ -19,18 +19,18 @@ lazy val root = (project in file("."))
       "io.spray" % "spray-json_2.13" % "1.3.5", // Immortan,
       "com.typesafe.akka" % "akka-actor_2.13" % "2.6.9",
       "io.netty" % "netty-all" % "4.1.42.Final",
-      "com.softwaremill.quicklens" % "quicklens_2.13" % "1.6.1",
+      "com.softwaremill.quicklens" % "quicklens_2.13" % "1.8.4",
       "org.bouncycastle" % "bcprov-jdk15to18" % "1.68",
-      "com.google.guava" % "guava" % "29.0-android",
+      "com.google.guava" % "guava" % "31.1-jre",
       "org.scala-lang.modules" % "scala-parser-combinators_2.13" % "2.1.0",
       "com.sparrowwallet" % "hummingbird" % "1.6.2",
       "com.squareup.okhttp3" % "okhttp" % "4.9.0",
-      "fr.acinq.secp256k1" % "secp256k1-kmp-jni-android" % "0.5.2",
+      "fr.acinq.secp256k1" % "secp256k1-kmp-jni-jvm" % "0.5.2",
       // Config
       "com.iheart" % "ficus_2.13" % "1.5.0",
       // Testing
       "org.scalatest" % "scalatest_2.13" % "3.1.1",
-      "com.typesafe.akka" % "akka-testkit_2.13" % "2.5.32",
+      "com.typesafe.akka" % "akka-testkit_2.13" % "2.6.9",
       "org.xerial" % "sqlite-jdbc" % "3.27.2.1",
     )
   )

@@ -6,7 +6,7 @@ import fr.acinq.bitcoin.MerkleBlock.topHeight
 import fr.acinq.bitcoin.Protocol._
 import scodec.bits.ByteVector
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 
 /** @param version
   *   Block version information, based upon the software version creating this
@@ -166,6 +166,7 @@ object MerkleBlock extends BtcSerializer[MerkleBlock] {
     *   - remaining_hashes and remaining_bits are hashes and bits that have not
     *     been used
     */
+  @nowarn
   def computeRoot(
       count: Int,
       height: Int,

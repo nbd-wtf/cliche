@@ -307,14 +307,14 @@ case class WalletExt(
     copy(wallets = wallets1)
   }
 
-  def withNewLabel(label: String)(wallet1: ElectrumEclairWallet): WalletExt = {
+  def withNewLabel(label: String)(wallet: ElectrumEclairWallet): WalletExt = {
     require(
-      !wallet1.isBuiltIn,
+      !wallet.isBuiltIn,
       "Can not re-label a default built in chain wallet"
     )
-    def sameXPub(wallet: ElectrumEclairWallet): Boolean =
-      wallet.ewt.xPub == wallet1.ewt.xPub
-    params.walletDb.updateLabel(label, pub = wallet1.ewt.xPub.publicKey)
+    val sameXPub: ElectrumEclairWallet => Boolean =
+      _.ewt.xPub == wallet.ewt.xPub
+    params.walletDb.updateLabel(label, pub = wallet.ewt.xPub.publicKey)
     me.modify(_.wallets.eachWhere(sameXPub).info.label).setTo(label)
   }
 

@@ -1,5 +1,6 @@
 package fr.acinq.eclair.wire
 
+import scala.annotation.nowarn
 import fr.acinq.eclair.UInt64.Conversions._
 import fr.acinq.eclair.wire.CommonCodecs._
 import fr.acinq.eclair.{MilliSatoshi, UInt64}
@@ -16,6 +17,7 @@ object TlvCodecs {
     * minimally-encoded. Note that this codec can only be used at the very end
     * of a TLV record.
     */
+  @nowarn
   val tu64: Codec[UInt64] = Codec(
     (u: UInt64) => {
       val b = u match {

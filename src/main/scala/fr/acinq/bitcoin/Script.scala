@@ -10,7 +10,7 @@ import java.io.{
 import fr.acinq.bitcoin.Crypto._
 import scodec.bits.ByteVector
 
-import scala.annotation.tailrec
+import scala.annotation.{tailrec, nowarn}
 import scala.collection.mutable.ArrayBuffer
 
 /** script execution flags
@@ -133,6 +133,7 @@ object ScriptFlags {
     STANDARD_SCRIPT_VERIFY_FLAGS & ~MANDATORY_SCRIPT_VERIFY_FLAGS
 }
 
+@nowarn
 object Script {
 
   import Protocol._

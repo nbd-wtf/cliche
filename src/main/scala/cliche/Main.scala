@@ -3,6 +3,7 @@ package cliche
 import java.io.{File}
 import java.net.InetSocketAddress
 import scala.io.{Source}
+import scala.annotation.nowarn
 import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
 import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
@@ -124,34 +125,28 @@ import scodec.bits.{ByteVector, HexStringSyntax}
 import cliche.utils.SQLiteUtils
 import cliche.{Commands}
 
-object Main extends App {
-  var userdir: File = new File("./data")
-  var config: Config = new Config(userdir)
+object Main {
+  @nowarn
+  def main(args: Array[String]): Unit = {
+    var userdir: File = new File("./data")
+    var config: Config = new Config(userdir)
 
-  val sqlitedb = SQLiteUtils.getConnection
-  val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
-  val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
-  var txDataBag: SQLiteTx = null
-  var lnUrlPayBag: SQLiteLNUrlPay = null
-  var chainWalletBag: SQLiteChainWallet = null
-  var extDataBag: SQLiteDataExtended = null
-  var currentChainNode: Option[InetSocketAddress] = None
-  var totalBalance = 0 sat
-  var txDescriptions: Map[ByteVector32, TxDescription] = Map.empty
+    val sqlitedb = SQLiteUtils.getConnection
+    val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
+    val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
+    var txDataBag: SQLiteTx = null
+    var lnUrlPayBag: SQLiteLNUrlPay = null
+    var chainWalletBag: SQLiteChainWallet = null
+    var extDataBag: SQLiteDataExtended = null
+    var currentChainNode: Option[InetSocketAddress] = None
+    var totalBalance = 0 sat
+    var txDescriptions: Map[ByteVector32, TxDescription] = Map.empty
 
-  CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
+    var lastTotalResyncStamp: Long = 0L
+    var lastNormalResyncStamp: Long = 0L
 
-  this.makeAlive()
-  println("isAlive %b".format(isAlive))
-  val secret = makeSecret()
-  this.makeOperational(secret)
-  println("LNParams.isOperational %b".format(LNParams.isOperational))
-  LNParams.system.log.info("Test IMMORTAN LOG output")
+    CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
 
-  def isAlive: Boolean =
-    null != txDataBag && null != lnUrlPayBag && null != chainWalletBag && null != extDataBag
-
-  def makeAlive(): Unit = {
     dbinterface txWrap {
       txDataBag = new SQLiteTx(dbinterface)
       lnUrlPayBag = new SQLiteLNUrlPay(dbinterface)
@@ -173,29 +168,20 @@ object Main extends App {
       RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
     LNParams.ourInit = LNParams.createInit
     LNParams.syncParams = new SyncParams
-  }
 
-  def makeSecret(): WalletSecret = {
+    println("is alive")
+
     val walletSeed =
       MnemonicCode.toSeed(config.mnemonics, passphrase = new String)
     val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
     val secret = WalletSecret(keys, config.mnemonics, walletSeed)
-
     extDataBag.putSecret(secret)
-    secret
-  }
+    LNParams.secret = secret
 
-  var lastTotalResyncStamp: Long = 0L
-  var lastNormalResyncStamp: Long = 0L
+    println("have secret")
 
-  def makeOperational(secret: WalletSecret): Unit = {
-    require(
-      isAlive,
-      "Application is not alive, hence can not become operational"
-    )
     val essentialInterface = new DBInterfaceSQLiteAndroidEssential(sqlitedb)
     val graphInterface = new DBInterfaceSQLiteAndroidGraph(sqlitedb)
-    LNParams.secret = secret
 
     val normalBag = new SQLiteNetwork(
       dbinterface,
@@ -213,7 +199,9 @@ object Main extends App {
 
     val chanBag =
       new SQLiteChannel(dbinterface, channelTxFeesDb = extDataBag.db) {
-        override def put(data: PersistentChannelData): PersistentChannelData = {
+        override def put(
+            data: PersistentChannelData
+        ): PersistentChannelData = {
 //        backupSaveWorker.replaceWork(true)
           super.put(data)
         }
@@ -359,29 +347,30 @@ object Main extends App {
 
     // Guaranteed to fire (and update chainWallets) first
     LNParams.chainWallets.catcher ! new WalletEventsListener {
-      override def onChainTipKnown(event: CurrentBlockCount): Unit =
+      override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
         LNParams.cm.initConnect
 
-      override def onWalletReady(event: WalletReady): Unit =
+      override def onWalletReady(blockCountEvent: WalletReady): Unit =
         LNParams.synchronized {
-          def sameXPub(wallet: ElectrumEclairWallet): Boolean =
-            wallet.ewt.xPub == event.xPub
+          val sameXPub: ElectrumEclairWallet => Boolean =
+            _.ewt.xPub == blockCountEvent.xPub
+
           LNParams.chainWallets = LNParams.chainWallets.modify(
             _.wallets.eachWhere(sameXPub).info
           ) using { info =>
             info.copy(
-              lastBalance = event.balance,
-              isCoinControlOn = event.excludedOutPoints.nonEmpty
+              lastBalance = blockCountEvent.balance,
+              isCoinControlOn = blockCountEvent.excludedOutPoints.nonEmpty
             )
           }
         }
 
-      override def onChainMasterSelected(event: InetSocketAddress): Unit =
-        currentChainNode = event.asSome
+      override def onChainMasterSelected(addr: InetSocketAddress): Unit =
+        currentChainNode = addr.asSome
 
       override def onChainDisconnected: Unit = currentChainNode = None
 
-      override def onTransactionReceived(event: TransactionReceived): Unit = {
+      override def onTransactionReceived(txEvent: TransactionReceived): Unit = {
         def addChainTx(
             received: Satoshi,
             sent: Satoshi,
@@ -414,49 +403,53 @@ object Main extends App {
             totalBalance: MilliSatoshi
         ): Unit = txDataBag.db txWrap {
           txDataBag.addTx(
-            event.tx,
-            event.depth,
+            txEvent.tx,
+            txEvent.depth,
             received,
             sent,
-            event.feeOpt,
-            event.xPub,
+            txEvent.feeOpt,
+            txEvent.xPub,
             description,
             isIncoming,
             balanceSnap = totalBalance,
             LNParams.fiatRates.info.rates,
-            event.stamp
+            txEvent.stamp
           )
           txDataBag.addSearchableTransaction(
-            description.queryText(event.tx.txid),
-            event.tx.txid
+            description.queryText(txEvent.tx.txid),
+            txEvent.tx.txid
           )
         }
 
-        val fee = event.feeOpt.getOrElse(0L.sat)
+        val fee = txEvent.feeOpt.getOrElse(0L.sat)
         val defDescription =
-          TxDescription.define(LNParams.cm.all.values, Nil, event.tx)
+          TxDescription.define(LNParams.cm.all.values, Nil, txEvent.tx)
         val sentTxDescription =
-          txDescriptions.getOrElse(event.tx.txid, default = defDescription)
-        if (event.sent == event.received + fee)
+          txDescriptions.getOrElse(txEvent.tx.txid, default = defDescription)
+        if (txEvent.sent == txEvent.received + fee)
           addChainTx(
             received = 0L.sat,
             sent = fee,
             sentTxDescription,
             isIncoming = 0L
           )
-        else if (event.sent > event.received)
+        else if (txEvent.sent > txEvent.received)
           addChainTx(
             received = 0L.sat,
-            event.sent - event.received - fee,
+            txEvent.sent - txEvent.received - fee,
             sentTxDescription,
             isIncoming = 0L
           )
         else
           addChainTx(
-            event.received - event.sent,
+            txEvent.received - txEvent.sent,
             sent = 0L.sat,
             TxDescription
-              .define(LNParams.cm.all.values, event.walletAddreses, event.tx),
+              .define(
+                LNParams.cm.all.values,
+                txEvent.walletAddreses,
+                txEvent.tx
+              ),
             isIncoming = 1L
           )
       }
@@ -469,60 +462,63 @@ object Main extends App {
     if (LNParams.cm.all.nonEmpty) pf process PathFinder.CMDStartPeriodicResync
     // This inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers
-  }
 
-  object NetworkListener extends ConnectionListener {
-    override def onOperational(
-        worker: CommsTower.Worker,
-        theirInit: Init
-    ): Unit = {
-      println(
-        s"Connected to remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
-      )
-    }
-    override def onDisconnect(worker: CommsTower.Worker): Unit = {
-      println(
-        s"Disconnected from remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
-      )
-    }
-  }
+    println("LNParams.isOperational %b".format(LNParams.isOperational))
+    LNParams.system.log.info("Test IMMORTAN LOG output")
 
-  // listen for outgoing payments
-  LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
-    override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
-      println(
-        s">> payment failed: ${data.cmd.fullTag.paymentHash} parts=${data.parts.size} failure=${data.failuresAsString}"
-      )
+    object NetworkListener extends ConnectionListener {
+      override def onOperational(
+          worker: CommsTower.Worker,
+          theirInit: Init
+      ): Unit = {
+        println(
+          s"Connected to remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
+        )
+      }
+      override def onDisconnect(worker: CommsTower.Worker): Unit = {
+        println(
+          s"Disconnected from remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
+        )
+      }
     }
 
-    override def gotFirstPreimage(
-        data: OutgoingPaymentSenderData,
-        fulfill: RemoteFulfill
-    ): Unit = {
-      println(
-        s">> payment success: ${fulfill.ourAdd.paymentHash} preimage=${fulfill.theirPreimage} fee=${data.usedFee}"
-      )
+    // listen for outgoing payments
+    LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
+      override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
+        println(
+          s">> payment failed: ${data.cmd.fullTag.paymentHash} parts=${data.parts.size} failure=${data.failuresAsString}"
+        )
+      }
+
+      override def gotFirstPreimage(
+          data: OutgoingPaymentSenderData,
+          fulfill: RemoteFulfill
+      ): Unit = {
+        println(
+          s">> payment success: ${fulfill.ourAdd.paymentHash} preimage=${fulfill.theirPreimage} fee=${data.usedFee}"
+        )
+      }
     }
-  }
 
-  val remotePeer: RemoteNodeInfo = RemoteNodeInfo(
-    PublicKey(
-      hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
-    ),
-    NodeAddress.unresolved(9734, host = 107, 189, 30, 195),
-    "@lntxbot"
-  )
+    val remotePeer: RemoteNodeInfo = RemoteNodeInfo(
+      PublicKey(
+        hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
+      ),
+      NodeAddress.unresolved(9734, host = 107, 189, 30, 195),
+      "@lntxbot"
+    )
 
-  val ourLocalNodeId =
-    Tools.randomKeyPair
+    val ourLocalNodeId =
+      Tools.randomKeyPair
 
-  CommsTower.listen(
-    Set(NetworkListener),
-    KeyPairAndPubKey(ourLocalNodeId, remotePeer.nodeId),
-    remotePeer
-  )
+    CommsTower.listen(
+      Set(NetworkListener),
+      KeyPairAndPubKey(ourLocalNodeId, remotePeer.nodeId),
+      remotePeer
+    )
 
-  while (true) {
-    Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
+    while (true) {
+      Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
+    }
   }
 }
