@@ -7,3 +7,4 @@ data/db.sqlite
 data/wallet.conf
 debug.log
 .metals/
+.bloop/
