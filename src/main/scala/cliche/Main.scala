@@ -4,44 +4,38 @@ import java.io.{File}
 import java.net.InetSocketAddress
 import scala.io.{Source}
 import scala.annotation.nowarn
-import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
-import fr.acinq.eclair.wire.CommonCodecs.nodeaddress
-import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi, SatoshiLong}
-import fr.acinq.eclair.MilliSatoshi
-import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
-import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
-import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
-import fr.acinq.eclair.blockchain.electrum.ElectrumWallet.{
-  TransactionReceived,
-  WalletReady
-}
+import scodec.bits.{HexStringSyntax}
+import java.util.concurrent.atomic.AtomicLong
+import akka.actor
+import com.softwaremill.quicklens._
+import fr.acinq.eclair.{MilliSatoshi}
+import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.eclair.wire.NodeAddress
 import fr.acinq.eclair.blockchain.electrum.db.{
   CompleteChainWalletInfo,
   SigningWallet,
   WatchingWallet
 }
+import fr.acinq.eclair.router.Router
+import fr.acinq.eclair.transactions.{DirectedHtlc, RemoteFulfill}
+import fr.acinq.eclair.wire.{Init}
+import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
 import fr.acinq.eclair.blockchain.electrum.{
+  ElectrumWallet,
+  ElectrumEclairWallet,
   CheckPoint,
   ElectrumChainSync,
   ElectrumClientPool,
   ElectrumWatcher,
   WalletParameters
 }
-import fr.acinq.eclair.channel.{
-  CMD_CHECK_FEERATE,
-  Commitments,
-  PersistentChannelData
+import fr.acinq.eclair.blockchain.electrum.db.{
+  CompleteChainWalletInfo,
+  SigningWallet,
+  WatchingWallet
 }
-import fr.acinq.eclair.router.Router.RouterConf
-import fr.acinq.eclair.wire.CommonCodecs.nodeaddress
-import fr.acinq.eclair.wire.NodeAddress
-import com.btcontract.wallet.sqlite.{
-  DBInterfaceSQLiteAndroidEssential,
-  DBInterfaceSQLiteAndroidGraph,
-  DBInterfaceSQLiteAndroidMisc,
-  SQLiteDataExtended
-}
-import fr.acinq.bitcoin.ByteVector32.fromValidHex
+import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE, PersistentChannelData}
 import immortan.{
   ClearnetConnectionProvider,
   ChanFundingTxDescription,
@@ -60,7 +54,6 @@ import immortan.{
   WalletSecret
 }
 import immortan.fsm.{OutgoingPaymentListener, OutgoingPaymentSenderData}
-import immortan.crypto.Tools.{Any2Some, none, runAnd}
 import immortan.sqlite.{
   DBInterfaceSQLiteGeneral,
   HostedChannelAnnouncementTable,
@@ -84,43 +77,18 @@ import immortan.utils.{
   FiatRates,
   FiatRatesInfo,
   FiatRatesListener,
-  Rx,
   WalletEventsCatcher,
   WalletEventsListener
 }
-import scodec.bits.BitVector
-
-import java.util.concurrent.atomic.AtomicLong
-import akka.actor.{Props}
-import com.google.common.io.ByteStreams
-import com.softwaremill.quicklens._
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin._
-import fr.acinq.eclair.Features._
-import fr.acinq.eclair._
-import fr.acinq.eclair.blockchain.EclairWallet
-import fr.acinq.eclair.blockchain.electrum.ElectrumWallet.WalletReady
-import fr.acinq.eclair.blockchain.electrum._
-import fr.acinq.eclair.blockchain.electrum.db.{
-  CompleteChainWalletInfo,
-  SigningWallet,
-  WatchingWallet
+import immortan.crypto.Tools
+import immortan.crypto.Tools.{~, Any2Some}
+import com.btcontract.wallet.sqlite.{
+  DBInterfaceSQLiteAndroidEssential,
+  DBInterfaceSQLiteAndroidGraph,
+  DBInterfaceSQLiteAndroidMisc,
+  SQLiteDataExtended
 }
-import fr.acinq.eclair.channel.{ChannelKeys, LocalParams, PersistentChannelData}
-import fr.acinq.eclair.router.ChannelUpdateExt
-import fr.acinq.eclair.router.Router.{PublicChannel, RouterConf}
-import fr.acinq.eclair.transactions.{DirectedHtlc, RemoteFulfill}
-import fr.acinq.eclair.wire._
-import immortan.SyncMaster.ShortChanIdSet
-import immortan.crypto.{CanBeShutDown, Tools}
-import immortan.crypto.Noise.KeyPair
-import immortan.crypto.Tools._
-import immortan.sqlite._
-import immortan.utils._
-import immortan.wire.ExtCodecs
-import scodec.bits.{ByteVector, HexStringSyntax}
 
-// local
 import cliche.utils.SQLiteUtils
 import cliche.{Commands}
 
@@ -139,7 +107,7 @@ object Main {
     var chainWalletBag: SQLiteChainWallet = null
     var extDataBag: SQLiteDataExtended = null
     var currentChainNode: Option[InetSocketAddress] = None
-    var totalBalance = 0 sat
+    var totalBalance = Satoshi(0L)
     var txDescriptions: Map[ByteVector32, TxDescription] = Map.empty
 
     var lastTotalResyncStamp: Long = 0L
@@ -166,7 +134,7 @@ object Main {
     }
 
     LNParams.routerConf =
-      RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
+      Router.RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
     LNParams.ourInit = LNParams.createInit
     LNParams.syncParams = new SyncParams
 
@@ -235,7 +203,7 @@ object Main {
 
     println("# instantiating electrum actors")
     val electrumPool = LNParams.loggedActor(
-      Props(
+      actor.Props(
         classOf[ElectrumClientPool],
         LNParams.blockCount,
         LNParams.chainHash,
@@ -244,7 +212,7 @@ object Main {
       "connection-pool"
     )
     val sync = LNParams.loggedActor(
-      Props(
+      actor.Props(
         classOf[ElectrumChainSync],
         electrumPool,
         extDataBag,
@@ -253,11 +221,14 @@ object Main {
       "chain-sync"
     )
     val watcher = LNParams.loggedActor(
-      Props(classOf[ElectrumWatcher], LNParams.blockCount, electrumPool),
+      actor.Props(classOf[ElectrumWatcher], LNParams.blockCount, electrumPool),
       "channel-watcher"
     )
     val catcher =
-      LNParams.loggedActor(Props(new WalletEventsCatcher), "events-catcher")
+      LNParams.loggedActor(
+        actor.Props(new WalletEventsCatcher),
+        "events-catcher"
+      )
 
     println("# loading onchain wallets")
     val params =
@@ -265,7 +236,7 @@ object Main {
         extDataBag,
         chainWalletBag,
         txDataBag,
-        dustLimit = 546L.sat
+        dustLimit = Satoshi(546L)
       )
     val walletExt: WalletExt =
       (WalletExt(
@@ -327,7 +298,9 @@ object Main {
       override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
         LNParams.cm.initConnect
 
-      override def onWalletReady(blockCountEvent: WalletReady): Unit =
+      override def onWalletReady(
+          blockCountEvent: ElectrumWallet.WalletReady
+      ): Unit =
         LNParams.synchronized {
           val sameXPub: ElectrumEclairWallet => Boolean =
             _.ewt.xPub == blockCountEvent.xPub
@@ -347,7 +320,9 @@ object Main {
 
       override def onChainDisconnected: Unit = currentChainNode = None
 
-      override def onTransactionReceived(txEvent: TransactionReceived): Unit = {
+      override def onTransactionReceived(
+          txEvent: ElectrumWallet.TransactionReceived
+      ): Unit = {
         def addChainTx(
             received: Satoshi,
             sent: Satoshi,
@@ -398,21 +373,21 @@ object Main {
           )
         }
 
-        val fee = txEvent.feeOpt.getOrElse(0L.sat)
+        val fee = txEvent.feeOpt.getOrElse(Satoshi(0L))
         val defDescription =
           TxDescription.define(LNParams.cm.all.values, Nil, txEvent.tx)
         val sentTxDescription =
           txDescriptions.getOrElse(txEvent.tx.txid, default = defDescription)
         if (txEvent.sent == txEvent.received + fee)
           addChainTx(
-            received = 0L.sat,
+            received = Satoshi(0L),
             sent = fee,
             sentTxDescription,
             isIncoming = 0L
           )
         else if (txEvent.sent > txEvent.received)
           addChainTx(
-            received = 0L.sat,
+            received = Satoshi(0L),
             txEvent.sent - txEvent.received - fee,
             sentTxDescription,
             isIncoming = 0L
@@ -420,7 +395,7 @@ object Main {
         else
           addChainTx(
             txEvent.received - txEvent.sent,
-            sent = 0L.sat,
+            sent = Satoshi(0L),
             TxDescription
               .define(
                 LNParams.cm.all.values,

@@ -4,9 +4,11 @@ import org.json4s._
 import org.json4s.native.JsonMethods.{parse}
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
-import fr.acinq.eclair.{MilliSatoshi, MilliSatoshiLong, randomBytes32}
+import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.NodeAddress
 import fr.acinq.eclair.payment.{Bolt11Invoice}
+import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
+import fr.acinq.bitcoin.ByteVector32
 import immortan.fsm.{HCOpenHandler, SendMultiPart}
 import immortan.{
   ChannelHosted,
@@ -18,16 +20,11 @@ import immortan.{
   PaymentDescription,
   RemoteNodeInfo
 }
-import immortan.utils.ImplicitJsonFormats._
-import immortan.crypto.Tools.{~}
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
-import fr.acinq.bitcoin.ByteVector32
-import immortan.utils.ImplicitJsonFormats.to
 import immortan.utils.PaymentRequestExt
+import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
 
 import scala.util.Try
-import util.control.Breaks._
 
 trait Command
 
