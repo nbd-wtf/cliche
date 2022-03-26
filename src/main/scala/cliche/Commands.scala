@@ -91,7 +91,15 @@ object Commands {
   }
 
   def getInfo(): Unit = {
-    println(LNParams.cm.all)
+    println(s"chain: ${LNParams.chainHash}")
+    println(s"wallets: ${LNParams.chainWallets}")
+    println(s"ln init:: ${LNParams.ourInit}")
+    println(s"channels: ${LNParams.cm.all.view.mapValues(_.data).toMap}")
+    println(s"router conf: ${LNParams.routerConf}")
+    println(s"fiat rates: ${LNParams.fiatRates}")
+    println(s"fee rates: ${LNParams.feeRates}")
+    println(s"outgoing payments: ${LNParams.cm.allInChannelOutgoing}")
+    println(s"delayed refunds: ${LNParams.cm.delayedRefunds}")
   }
 
   def requestHostedChannel(params: RequestHostedChannel): Unit = {
