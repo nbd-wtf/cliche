@@ -4,8 +4,6 @@ import java.io.{File}
 import java.net.InetSocketAddress
 import scala.io.{Source}
 import scala.annotation.nowarn
-import fr.acinq.eclair.blockchain.electrum.ElectrumClient.SSL
-import fr.acinq.eclair.blockchain.electrum.ElectrumClientPool.ElectrumServerAddress
 import fr.acinq.eclair.channel.CMD_CHECK_FEERATE
 import fr.acinq.eclair.wire.CommonCodecs.nodeaddress
 import fr.acinq.bitcoin.{Block, ByteVector32, Satoshi, SatoshiLong}
@@ -227,31 +225,6 @@ object Main {
         .toSet
       override def getPHCExtraNodes: Set[RemoteNodeInfo] =
         LNParams.cm.allHostedCommits.map(_.remoteInfo).toSet
-    }
-
-    println("# setting up electrum")
-    ElectrumClientPool.loadFromChainHash = {
-      case Block.LivenetGenesisBlock.hash =>
-        ElectrumClientPool.readServerAddresses(
-          getClass.getResourceAsStream("servers_mainnet.json")
-        )
-      case Block.TestnetGenesisBlock.hash =>
-        ElectrumClientPool.readServerAddresses(
-          getClass.getResourceAsStream("servers_testnet.json")
-        )
-      case _ => throw new RuntimeException
-    }
-
-    CheckPoint.loadFromChainHash = {
-      case Block.LivenetGenesisBlock.hash =>
-        CheckPoint.load(
-          getClass.getResourceAsStream("checkpoints_mainnet.json")
-        )
-      case Block.TestnetGenesisBlock.hash =>
-        CheckPoint.load(
-          getClass.getResourceAsStream("checkpoints_testnet.json")
-        )
-      case _ => throw new RuntimeException
     }
 
     println("# instantiating channel master")
