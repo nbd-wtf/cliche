@@ -1,7 +1,8 @@
 package cliche
 
 import org.json4s._
-import org.json4s.native.JsonMethods.{parse}
+import org.json4s.native.JsonMethods
+import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
@@ -48,21 +49,36 @@ object Commands {
 
   def decode(input: String): Command = {
     try {
-      val parsed: JValue = parse(input)
+      val parsed: JValue = JsonMethods.parse(input)
       val method = parsed \ "method"
       val params = parsed \ "params"
 
       (parsed \ "method").extract[String] match {
-        case "get-info"               => params.extract[GetInfo]
-        case "request-hosted-channel" => params.extract[RequestHostedChannel]
-        case "create-invoice"         => params.extract[CreateInvoice]
-        case "pay-invoice"            => params.extract[PayInvoice]
-        case "check-invoice"          => params.extract[CheckInvoice]
-        case "check-payment"          => params.extract[CheckPayment]
-        case _                        => UnknownCommand()
+        case "get-info"       => params.extract[GetInfo]
+        case "request-hc"     => params.extract[RequestHostedChannel]
+        case "create-invoice" => params.extract[CreateInvoice]
+        case "pay-invoice"    => params.extract[PayInvoice]
+        case "check-invoice"  => params.extract[CheckInvoice]
+        case "check-payment"  => params.extract[CheckPayment]
+        case _                => UnknownCommand()
       }
     } catch {
-      case _: Throwable => NoCommand()
+      case _: Throwable => {
+        val spl = input.split(" ")
+        val res = spl(0) match {
+          case "get-info"       => CaseApp.parse[GetInfo](spl.tail)
+          case "request-hc"     => CaseApp.parse[RequestHostedChannel](spl.tail)
+          case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
+          case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
+          case "check-invoice"  => CaseApp.parse[CheckInvoice](spl.tail)
+          case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
+          case _                => Right(UnknownCommand(), Seq.empty[String])
+        }
+        res match {
+          case Left(_)         => NoCommand()
+          case Right((cmd, _)) => cmd
+        }
+      }
     }
   }
 

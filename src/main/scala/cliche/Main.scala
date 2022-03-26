@@ -129,7 +129,9 @@ object Main {
       case "testnet" => LNParams.chainHash = Block.TestnetGenesisBlock.hash
       case "mainnet" => LNParams.chainHash = Block.LivenetGenesisBlock.hash
       case _ =>
-        println(s"Impossible config.network option ${config.network}");
+        println(
+          s"< impossible config.network option ${config.network}"
+        );
         sys.exit(1)
     }
 
@@ -179,10 +181,8 @@ object Main {
 
     println("# setting up pathfinder")
     val pf = new PathFinder(normalBag, hostedBag) {
-      override def getLastTotalResyncStamp: Long =
-        lastTotalResyncStamp // app.prefs.getLong(LAST_TOTAL_GOSSIP_SYNC, 0L)
-      override def getLastNormalResyncStamp: Long =
-        lastNormalResyncStamp // app.prefs.getLong(LAST_NORMAL_GOSSIP_SYNC, 0L)
+      override def getLastTotalResyncStamp: Long = lastTotalResyncStamp
+      override def getLastNormalResyncStamp: Long = lastNormalResyncStamp
       override def updateLastTotalResyncStamp(stamp: Long): Unit =
         lastTotalResyncStamp = stamp
       override def updateLastNormalResyncStamp(stamp: Long): Unit =
@@ -196,10 +196,7 @@ object Main {
     }
 
     println("# instantiating channel master")
-    LNParams.cm = new ChannelMaster(payBag, chanBag, extDataBag, pf) {
-      // There will be a disconnect if VPN (Orbot) suddenly stops working, we then clear everything and restart an app
-      override def initConnect: Unit = super.initConnect
-    }
+    LNParams.cm = new ChannelMaster(payBag, chanBag, extDataBag, pf)
 
     println("# instantiating electrum actors")
     val electrumPool = LNParams.loggedActor(
@@ -415,24 +412,7 @@ object Main {
     // This inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers
 
-    println("# is operational: %b".format(LNParams.isOperational))
-    LNParams.system.log.info("Test IMMORTAN LOG output")
-
-    object NetworkListener extends ConnectionListener {
-      override def onOperational(
-          worker: CommsTower.Worker,
-          theirInit: Init
-      ): Unit = {
-        println(
-          s"Connected to remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
-        )
-      }
-      override def onDisconnect(worker: CommsTower.Worker): Unit = {
-        println(
-          s"Disconnected from remote nodeId=${worker.info.nodeId} as local nodeId=${worker.pair.keyPair.pub}"
-        )
-      }
-    }
+    println(s"# is operational: ${LNParams.isOperational}")
 
     // listen for outgoing payments
     LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
@@ -451,23 +431,6 @@ object Main {
         )
       }
     }
-
-    val remotePeer: RemoteNodeInfo = RemoteNodeInfo(
-      PublicKey(
-        hex"03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
-      ),
-      NodeAddress.unresolved(9734, host = 107, 189, 30, 195),
-      "@lntxbot"
-    )
-
-    val ourLocalNodeId =
-      Tools.randomKeyPair
-
-    CommsTower.listen(
-      Set(NetworkListener),
-      KeyPairAndPubKey(ourLocalNodeId, remotePeer.nodeId),
-      remotePeer
-    )
 
     while (true) {
       Commands.handle(Commands.decode(scala.io.StdIn.readLine()))

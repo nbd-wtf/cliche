@@ -25,6 +25,7 @@ lazy val root = (project in file("."))
       "org.scala-lang.modules" % "scala-parser-combinators_2.13" % "2.1.0",
       "com.sparrowwallet" % "hummingbird" % "1.6.2",
       "com.squareup.okhttp3" % "okhttp" % "4.9.0",
+      "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13",
       "fr.acinq.secp256k1" % "secp256k1-kmp-jni-jvm" % "0.5.2",
       // Config
       "com.iheart" % "ficus_2.13" % "1.5.0",

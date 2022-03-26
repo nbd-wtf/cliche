@@ -70,6 +70,7 @@ abstract class PathFinder(val normalBag: NetworkBag, val hostedBag: NetworkBag)
 
   implicit val context: ExecutionContextExecutor =
     ExecutionContext fromExecutor Executors.newSingleThreadExecutor
+
   def process(changeMessage: Any): Unit =
     scala.concurrent.Future(me doProcess changeMessage)
 
