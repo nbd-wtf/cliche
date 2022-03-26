@@ -45,6 +45,7 @@ import com.btcontract.wallet.sqlite.{
 }
 import fr.acinq.bitcoin.ByteVector32.fromValidHex
 import immortan.{
+  ClearnetConnectionProvider,
   ChanFundingTxDescription,
   Channel,
   ChannelMaster,
@@ -128,6 +129,7 @@ import cliche.{Commands}
 object Main {
   @nowarn
   def main(args: Array[String]): Unit = {
+    println("# initial parameters")
     var userdir: File = new File("./data")
     var config: Config = new Config(userdir)
 
@@ -145,6 +147,7 @@ object Main {
     var lastTotalResyncStamp: Long = 0L
     var lastNormalResyncStamp: Long = 0L
 
+    LNParams.connectionProvider = new ClearnetConnectionProvider
     CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
 
     dbinterface txWrap {
@@ -169,8 +172,6 @@ object Main {
     LNParams.ourInit = LNParams.createInit
     LNParams.syncParams = new SyncParams
 
-    println("is alive")
-
     val walletSeed =
       MnemonicCode.toSeed(config.mnemonics, passphrase = new String)
     val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
@@ -178,8 +179,7 @@ object Main {
     extDataBag.putSecret(secret)
     LNParams.secret = secret
 
-    println("have secret")
-
+    println("# setting up database")
     val essentialInterface = new DBInterfaceSQLiteAndroidEssential(sqlitedb)
     val graphInterface = new DBInterfaceSQLiteAndroidGraph(sqlitedb)
 
@@ -202,7 +202,6 @@ object Main {
         override def put(
             data: PersistentChannelData
         ): PersistentChannelData = {
-//        backupSaveWorker.replaceWork(true)
           super.put(data)
         }
       }
@@ -212,6 +211,7 @@ object Main {
       LNParams.fiatRates = new FiatRates(extDataBag)
     }
 
+    println("# setting up pathfinder")
     val pf = new PathFinder(normalBag, hostedBag) {
       override def getLastTotalResyncStamp: Long =
         lastTotalResyncStamp // app.prefs.getLong(LAST_TOTAL_GOSSIP_SYNC, 0L)
@@ -229,6 +229,7 @@ object Main {
         LNParams.cm.allHostedCommits.map(_.remoteInfo).toSet
     }
 
+    println("# setting up electrum")
     ElectrumClientPool.loadFromChainHash = {
       case Block.LivenetGenesisBlock.hash =>
         ElectrumClientPool.readServerAddresses(
@@ -253,18 +254,13 @@ object Main {
       case _ => throw new RuntimeException
     }
 
+    println("# instantiating channel master")
     LNParams.cm = new ChannelMaster(payBag, chanBag, extDataBag, pf) {
       // There will be a disconnect if VPN (Orbot) suddenly stops working, we then clear everything and restart an app
       override def initConnect: Unit = super.initConnect
     }
 
-    val params =
-      WalletParameters(
-        extDataBag,
-        chainWalletBag,
-        txDataBag,
-        dustLimit = 546L.sat
-      )
+    println("# instantiating electrum actors")
     val electrumPool = LNParams.loggedActor(
       Props(
         classOf[ElectrumClientPool],
@@ -278,7 +274,7 @@ object Main {
       Props(
         classOf[ElectrumChainSync],
         electrumPool,
-        params.headerDb,
+        extDataBag,
         LNParams.chainHash
       ),
       "chain-sync"
@@ -290,6 +286,14 @@ object Main {
     val catcher =
       LNParams.loggedActor(Props(new WalletEventsCatcher), "events-catcher")
 
+    println("# loading onchain wallets")
+    val params =
+      WalletParameters(
+        extDataBag,
+        chainWalletBag,
+        txDataBag,
+        dustLimit = 546L.sat
+      )
     val walletExt: WalletExt =
       (WalletExt(
         wallets = Nil,
@@ -463,7 +467,7 @@ object Main {
     // This inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers
 
-    println("LNParams.isOperational %b".format(LNParams.isOperational))
+    println("# is operational: %b".format(LNParams.isOperational))
     LNParams.system.log.info("Test IMMORTAN LOG output")
 
     object NetworkListener extends ConnectionListener {
