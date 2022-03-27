@@ -8,3 +8,5 @@ data/wallet.conf
 debug.log
 .metals/
 .bloop/
+project/metals.sbt
+project/project
