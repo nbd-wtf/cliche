@@ -2,17 +2,19 @@ package cliche
 
 import org.json4s._
 import org.json4s.native.JsonMethods
+import org.json4s.JsonDSL.WithDouble._
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
-import fr.acinq.eclair.wire.NodeAddress
+import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.ByteVector32
-import immortan.fsm.{HCOpenHandler, SendMultiPart}
+import immortan.fsm.{HCOpenHandler}
 import immortan.{
+  Channel,
   ChannelHosted,
   ChannelMaster,
   CommitsAndMax,
@@ -97,15 +99,40 @@ object Commands {
   }
 
   def getInfo(): Unit = {
-    println(s"chain: ${LNParams.chainHash}")
-    println(s"wallets: ${LNParams.chainWallets}")
-    println(s"ln init:: ${LNParams.ourInit}")
-    println(s"channels: ${LNParams.cm.all.view.mapValues(_.data).toMap}")
-    println(s"router conf: ${LNParams.routerConf}")
-    println(s"fiat rates: ${LNParams.fiatRates}")
-    println(s"fee rates: ${LNParams.feeRates}")
-    println(s"outgoing payments: ${LNParams.cm.allInChannelOutgoing}")
-    println(s"delayed refunds: ${LNParams.cm.delayedRefunds}")
+    println(
+      JsonMethods.pretty(
+        JsonMethods.render(
+          // @formatter:off
+          ("block_height" -> LNParams.blockCount.get()) ~~
+          ("wallets" ->
+            LNParams.chainWallets.wallets.map { w =>
+              (("label" -> w.info.label) ~~
+               ("balance" -> w.info.lastBalance.toLong))
+            }
+          ) ~~
+          ("channels" ->
+            LNParams.cm.all.toList.map { kv =>
+              (("id" -> kv._1.toHex) ~~
+               ("balance" -> kv._2.data.ourBalance.toLong))
+            }
+          ) ~~
+          ("outgoing_payments" ->
+            LNParams.cm.allInChannelOutgoing.toList.map { kv =>
+              (("hash" -> kv._1.paymentHash.toHex) ~~
+               ("htlcs" ->
+                 kv._2.map { htlcAdd =>
+                   (("id" -> htlcAdd.id) ~~
+                    ("msatoshi" -> htlcAdd.amountMsat.toLong) ~~
+                    ("channel" -> htlcAdd.channelId.toHex) ~~
+                    ("expiry" -> htlcAdd.cltvExpiry.underlying))
+                 }
+               ))
+            }
+          )
+          // @formatter:on
+        )
+      )
+    )
   }
 
   def requestHostedChannel(params: RequestHostedChannel): Unit = {
