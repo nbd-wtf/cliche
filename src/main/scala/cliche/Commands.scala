@@ -2,6 +2,7 @@ package cliche
 
 import org.json4s._
 import org.json4s.native.JsonMethods
+import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.Commitments
@@ -29,8 +30,8 @@ import scala.util.Try
 
 trait Command
 
-case class NoCommand() extends Command
 case class UnknownCommand() extends Command
+case class ShowError(err: caseapp.core.Error) extends Command
 case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
     extends Command
@@ -75,7 +76,7 @@ object Commands {
           case _                => Right(UnknownCommand(), Seq.empty[String])
         }
         res match {
-          case Left(_)         => NoCommand()
+          case Left(err)       => ShowError(err)
           case Right((cmd, _)) => cmd
         }
       }
@@ -83,11 +84,16 @@ object Commands {
   }
 
   def handle(command: Command): Unit = command match {
-    case GetInfo()                    => Commands.getInfo()
+    case params: ShowError            => Commands.showError(params)
+    case _: GetInfo                   => Commands.getInfo()
     case params: RequestHostedChannel => Commands.requestHostedChannel(params)
     case params: CreateInvoice        => Commands.createInvoice(params)
     case params: PayInvoice           => Commands.payInvoice(params)
     case _                            => println("unhandled command", command)
+  }
+
+  def showError(params: ShowError): Unit = {
+    println(params.err.message)
   }
 
   def getInfo(): Unit = {
@@ -107,7 +113,8 @@ object Commands {
       LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
     ByteVector.fromHex(params.pubkey) match {
-      case None => {}
+      case None                                => {}
+      case Some(pubkey) if pubkey.length != 33 => {}
       case Some(pubkey) => {
         val target: RemoteNodeInfo = RemoteNodeInfo(
           PublicKey(pubkey),
