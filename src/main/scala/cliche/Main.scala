@@ -141,9 +141,9 @@ object Main {
     LNParams.syncParams = new SyncParams
 
     val walletSeed =
-      MnemonicCode.toSeed(config.mnemonics, passphrase = new String)
+      MnemonicCode.toSeed(config.seed, passphrase = new String)
     val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
-    val secret = WalletSecret(keys, config.mnemonics, walletSeed)
+    val secret = WalletSecret(keys, config.seed, walletSeed)
     extDataBag.putSecret(secret)
     LNParams.secret = secret
 
