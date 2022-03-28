@@ -121,6 +121,7 @@ object Commands {
                ("balance" -> kv._2.data.ourBalance.toLong))
             }
           ) ~~
+          ("pathfinder" -> Main.pf.syncMaster.map(_.provenShortIds).getOrElse(Set.empty[Long]).toList) ~~
           ("outgoing_payments" ->
             LNParams.cm.allInChannelOutgoing.toList.map { kv =>
               (("hash" -> kv._1.paymentHash.toHex) ~~
