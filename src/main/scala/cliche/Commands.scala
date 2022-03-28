@@ -133,6 +133,14 @@ object Commands {
                  }
                ))
             }
+          ) ~~
+          ("fiat_rates" -> LNParams.fiatRates.info.rates.filter {
+            case (currency: String, _) => currency == "usd"
+          }) ~~
+          ("fee_rates" ->
+            (("1" -> LNParams.feeRates.info.smoothed.feePerBlock(1).toLong) ~~
+             ("10" -> LNParams.feeRates.info.smoothed.feePerBlock(10).toLong) ~~
+             ("100" -> LNParams.feeRates.info.smoothed.feePerBlock(100).toLong))
           )
           // @formatter:on
         )
