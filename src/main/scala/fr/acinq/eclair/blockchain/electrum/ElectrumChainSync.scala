@@ -3,7 +3,7 @@ package fr.acinq.eclair.blockchain.electrum
 import akka.actor.{ActorRef, FSM, PoisonPill}
 import fr.acinq.bitcoin.{Block, ByteVector32}
 import fr.acinq.eclair.blockchain.electrum.Blockchain.RETARGETING_PERIOD
-import fr.acinq.eclair.blockchain.electrum.ElectrumClient.GetHeaders
+import fr.acinq.eclair.blockchain.electrum.ElectrumClient
 import fr.acinq.eclair.blockchain.electrum.ElectrumWallet.{
   DISCONNECTED,
   RUNNING,
@@ -183,7 +183,7 @@ class ElectrumChainSync(
   }
 
   whenUnhandled {
-    case Event(getHeaders: GetHeaders, _) =>
+    case Event(getHeaders: ElectrumClient.GetHeaders, _) =>
       client ! getHeaders
       stay
 

@@ -42,8 +42,6 @@ import immortan.{
   Channel,
   ChannelMaster,
   CommsTower,
-  ConnectionListener,
-  KeyPairAndPubKey,
   LNParams,
   LightningNodeKeys,
   PathFinder,
@@ -71,6 +69,7 @@ import immortan.sqlite.{
   SQLiteTx
 }
 import immortan.utils.{
+  Rx,
   FeeRates,
   FeeRatesInfo,
   FeeRatesListener,
@@ -81,7 +80,7 @@ import immortan.utils.{
   WalletEventsListener
 }
 import immortan.crypto.Tools
-import immortan.crypto.Tools.{~, Any2Some}
+import immortan.crypto.Tools.{~, none, Any2Some}
 import com.btcontract.wallet.sqlite.{
   DBInterfaceSQLiteAndroidEssential,
   DBInterfaceSQLiteAndroidGraph,
@@ -279,7 +278,7 @@ object Main {
 
     LNParams.feeRates.listeners += new FeeRatesListener {
       def onFeeRates(newRatesInfo: FeeRatesInfo): Unit = {
-        // We may get fresh feerates after channels become OPEN
+        // we may get fresh feerates after channels become OPEN
         LNParams.cm.all.values.foreach(_ process CMD_CHECK_FEERATE)
         extDataBag.putFeeRatesInfo(newRatesInfo)
       }
@@ -290,7 +289,7 @@ object Main {
         extDataBag.putFiatRatesInfo(newRatesInfo)
     }
 
-    // Guaranteed to fire (and update chainWallets) first
+    // guaranteed to fire (and update chainWallets) first
     LNParams.chainWallets.catcher ! new WalletEventsListener {
       override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
         LNParams.cm.initConnect
@@ -404,6 +403,7 @@ object Main {
       }
     }
 
+    println("# pathfinder sync")
     pf.listeners += LNParams.cm.opm
     // Get channels and still active FSMs up and running
     LNParams.cm.all = Channel.load(listeners = Set(LNParams.cm), chanBag)
@@ -411,6 +411,49 @@ object Main {
     if (LNParams.cm.all.nonEmpty) pf process PathFinder.CMDStartPeriodicResync
     // This inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers
+
+    println("# start electrum, fee rate, fiat rate listeners")
+    LNParams.connectionProvider doWhenReady {
+      electrumPool ! ElectrumClientPool.InitConnect
+      // only schedule periodic resync if Lightning channels are being present
+      if (LNParams.cm.all.nonEmpty) pf process PathFinder.CMDStartPeriodicResync
+
+      val feeratePeriodHours = 6
+      val rateRetry = Rx.retry(
+        Rx.ioQueue.map(_ => LNParams.feeRates.reloadData),
+        Rx.incSec,
+        3 to 18 by 3
+      )
+      val rateRepeat = Rx.repeat(
+        rateRetry,
+        Rx.incHour,
+        feeratePeriodHours to Int.MaxValue by feeratePeriodHours
+      )
+      val feerateObs = Rx.initDelay(
+        rateRepeat,
+        LNParams.feeRates.info.stamp,
+        feeratePeriodHours * 3600 * 1000L
+      )
+      feerateObs.foreach(LNParams.feeRates.updateInfo, none)
+
+      val fiatPeriodSecs = 60 * 30
+      val fiatRetry = Rx.retry(
+        Rx.ioQueue.map(_ => LNParams.fiatRates.reloadData),
+        Rx.incSec,
+        3 to 18 by 3
+      )
+      val fiatRepeat = Rx.repeat(
+        fiatRetry,
+        Rx.incSec,
+        fiatPeriodSecs to Int.MaxValue by fiatPeriodSecs
+      )
+      val fiatObs = Rx.initDelay(
+        fiatRepeat,
+        LNParams.fiatRates.info.stamp,
+        fiatPeriodSecs * 1000L
+      )
+      fiatObs.foreach(LNParams.fiatRates.updateInfo, none)
+    }
 
     println(s"# is operational: ${LNParams.isOperational}")
 
