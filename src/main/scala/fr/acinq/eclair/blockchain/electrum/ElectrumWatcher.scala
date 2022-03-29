@@ -96,7 +96,6 @@ class ElectrumWatcher(blockCount: AtomicLong, client: ActorRef)
       ()
 
     case ElectrumClient.HeaderSubscriptionResponse(newheight, newtip) =>
-      log.info(s"new tip: ${newtip.blockId} $height")
       watches collect { case watch: WatchConfirmed =>
         val scriptHash = computeScriptHash(watch.publicKeyScript)
         client ! ElectrumClient.GetScriptHashHistory(scriptHash)
