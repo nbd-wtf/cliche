@@ -135,7 +135,13 @@ object Main {
   LNParams.routerConf =
     Router.RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
   LNParams.ourInit = LNParams.createInit
-  LNParams.syncParams = new SyncParams
+  LNParams.syncParams = new SyncParams {
+    override val minPHCCapacity = MilliSatoshi(10000000L)
+    override val minNormalChansForPHC = 1
+    override val maxPHCPerNode = 50
+    override val minCapacity = MilliSatoshi(10000000L)
+    override val maxNodesToSyncFrom = 3
+  }
 
   val walletSeed =
     MnemonicCode.toSeed(config.seed, passphrase = new String)
