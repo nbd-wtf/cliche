@@ -343,14 +343,14 @@ object Graph {
         channels.values.foreach { channel =>
           channel.update1Opt.foreach { update1 =>
             val desc1 = Router.getDesc(update1.update, channel.ann)
-            val edges1 = mutableMap(desc1.to)
+            val edges1 = mutableMap.getOrElse(desc1.to, Nil)
             val edges2 = GraphEdge(desc1, update1) :: edges1
             mutableMap += (desc1.to -> edges2)
           }
 
           channel.update2Opt.foreach { update2 =>
             val desc2 = Router.getDesc(update2.update, channel.ann)
-            val edges1 = mutableMap(desc2.to)
+            val edges1 = mutableMap.getOrElse(desc2.to, Nil)
             val edges2 = GraphEdge(desc2, update2) :: edges1
             mutableMap += (desc2.to -> edges2)
           }
