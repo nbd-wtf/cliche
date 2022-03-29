@@ -399,7 +399,8 @@ class SyncParams {
     lightning,
     acinq
   )
-  val phcSyncNodes: Set[RemoteNodeInfo] = Set(satm, motherbase, lntxbot1)
+  val phcSyncNodes: Set[RemoteNodeInfo] =
+    Set(satm, motherbase, lntxbot1, ergveinNet)
 
   val maxPHCCapacity: MilliSatoshi = MilliSatoshi(
     100000000000000L
