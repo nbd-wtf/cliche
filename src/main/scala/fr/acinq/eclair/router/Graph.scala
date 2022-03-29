@@ -164,11 +164,11 @@ object Graph {
 
     if (targetFound) {
       val edgePath = new ArrayBuffer[GraphEdge]
-      var current = bestEdges(sourceNode)
+      var current = bestEdges.getOrElse(sourceNode, null)
 
       while (null != current) {
         edgePath += current
-        current = bestEdges(current.desc.to)
+        current = bestEdges.getOrElse(current.desc.to, null)
       }
 
       edgePath.toSeq
