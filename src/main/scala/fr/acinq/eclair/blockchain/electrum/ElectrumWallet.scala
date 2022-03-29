@@ -430,6 +430,9 @@ class ElectrumWallet(
         data.copy(status = status1, accountKeys = data.accountKeys :+ newKey)
       client ! ElectrumClient.ScriptHashSubscription(newKeyScriptHash, self)
       stay using persistAndNotify(data1)
+
+    // prevent logging because this was unhandled
+    case Event(KEY_REFILL, _) => stay
   }
 
   initialize
