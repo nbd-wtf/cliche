@@ -51,7 +51,11 @@ import immortan.{
   WalletExt,
   WalletSecret
 }
-import immortan.fsm.{OutgoingPaymentListener, OutgoingPaymentSenderData}
+import immortan.fsm.{
+  OutgoingPaymentListener,
+  OutgoingPaymentSenderData,
+  IncomingRevealed
+}
 import immortan.sqlite.{
   DBInterfaceSQLiteGeneral,
   HostedChannelAnnouncementTable,
@@ -459,10 +463,9 @@ object Main {
     )
     fiatObs.foreach(LNParams.fiatRates.updateInfo, none)
   }
-
   println(s"# is operational: ${LNParams.isOperational}")
 
-  // listen for outgoing payments
+  println("# listening for outgoing payments")
   LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
     override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
       println(
@@ -479,6 +482,13 @@ object Main {
       )
     }
   }
+
+  println("# listening for incoming payments")
+  ChannelMaster.inFinalized
+    .collect { case revealed: IncomingRevealed => revealed }
+    .subscribe(r => {
+      println(s">> received payment: ${r.fullTag.paymentHash.toHex}")
+    })
 
   def main(args: Array[String]): Unit = {
     while (true) {
