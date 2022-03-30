@@ -4,6 +4,10 @@
 
 Before running put `reference.conf` as `wallet.conf` into `./data` directory.
 
-```
-sbt run
-```
+## Run
+
+`sbt run`
+
+## Pack JAR
+
+`sbt assembly`

@@ -28,3 +28,7 @@ libraryDependencies   ++= Seq(
   "com.typesafe.akka" % "akka-testkit_2.13" % "2.6.9",
   "org.xerial" % "sqlite-jdbc" % "3.27.2.1"
 )
+assemblyMergeStrategy := {
+  case x if x.endsWith("module-info.class") => MergeStrategy.discard
+  case x => (assembly / assemblyMergeStrategy).value(x)
+}
