@@ -37,7 +37,6 @@ import fr.acinq.eclair.blockchain.electrum.db.{
 }
 import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE, PersistentChannelData}
 import immortan.{
-  ClearnetConnectionProvider,
   ChanFundingTxDescription,
   Channel,
   ChannelMaster,
@@ -92,7 +91,10 @@ import com.btcontract.wallet.sqlite.{
   SQLiteDataExtended
 }
 
-import cliche.utils.SQLiteUtils
+import cliche.utils.{
+  SQLiteUtils,
+  ConnectionProvider => ClicheConnectionProvider
+}
 import cliche.{Commands}
 
 object Main {
@@ -114,7 +116,8 @@ object Main {
   var lastTotalResyncStamp: Long = 0L
   var lastNormalResyncStamp: Long = 0L
 
-  LNParams.connectionProvider = new ClearnetConnectionProvider
+  LNParams.connectionProvider = new ClicheConnectionProvider
+
   CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
 
   dbinterface txWrap {

@@ -18,7 +18,7 @@ libraryDependencies   ++= Seq(
   "org.scala-lang.modules" % "scala-parser-combinators_2.13" % "2.1.0",
   "com.sparrowwallet" % "hummingbird" % "1.6.2",
   "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13", // cliche
-  "com.squareup.okhttp3" % "okhttp" % "4.9.0",
+  "com.lihaoyi" % "requests_2.13" % "0.7.0", // cliche
 
   // config
   "com.iheart" % "ficus_2.13" % "1.5.0",

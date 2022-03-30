@@ -109,7 +109,7 @@ class EsploraFeeProvider(val url: String) extends FeeRatesProvider {
 
   def provide: FeeratesPerKB = {
     val structure =
-      to[EsploraFeeStructure](LNParams.connectionProvider.get(url).string)
+      to[EsploraFeeStructure](LNParams.connectionProvider.get(url))
 
     FeeratesPerKB(
       mempoolMinFee = extractFeerate(structure, 1008),
@@ -147,7 +147,7 @@ object BitgoFeeProvider extends FeeRatesProvider {
 
   def provide: FeeratesPerKB = {
     val structure =
-      to[BitGoFeeRateStructure](LNParams.connectionProvider.get(url).string)
+      to[BitGoFeeRateStructure](LNParams.connectionProvider.get(url))
 
     FeeratesPerKB(
       mempoolMinFee = extractFeerate(structure, 1008),

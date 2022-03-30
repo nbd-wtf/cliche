@@ -56,19 +56,17 @@ class FiatRates(bag: DataBag) extends CanBeShutDown {
     fr.acinq.eclair.secureRandom nextInt 3 match {
       case 0 =>
         to[CoinGecko](
-          LNParams.connectionProvider
-            .get("https://api.coingecko.com/api/v3/exchange_rates")
-            .string
+          LNParams.connectionProvider.get(
+            "https://api.coingecko.com/api/v3/exchange_rates"
+          )
         ).rates.map { case (code, item) => code.toLowerCase -> item.value }
       case 1 =>
         to[FiatRates.BlockchainInfoItemMap](
-          LNParams.connectionProvider
-            .get("https://blockchain.info/ticker")
-            .string
+          LNParams.connectionProvider.get("https://blockchain.info/ticker")
         ).map { case (code, item) => code.toLowerCase -> item.last }
       case _ =>
         to[Bitpay](
-          LNParams.connectionProvider.get("https://bitpay.com/rates").string
+          LNParams.connectionProvider.get("https://bitpay.com/rates")
         ).data.map { case BitpayItem(code, rate) =>
           code.toLowerCase -> rate
         }.toMap

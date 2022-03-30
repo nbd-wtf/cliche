@@ -64,7 +64,7 @@ object LNUrl {
 
   def level2DataResponse(bld: Uri.Builder): Observable[String] =
     Rx.ioQueue.map { _ =>
-      guardResponse(LNParams.connectionProvider.get(bld.build.toString).string)
+      guardResponse(LNParams.connectionProvider.get(bld.build.toString))
     }
 }
 
@@ -93,7 +93,7 @@ case class LNUrl(request: String) {
   }
 
   def level1DataResponse: Observable[LNUrlData] = Rx.ioQueue.map { _ =>
-    to[LNUrlData](LNParams.connectionProvider.get(uri.toString).string)
+    to[LNUrlData](LNParams.connectionProvider.get(uri.toString))
   }
 }
 
