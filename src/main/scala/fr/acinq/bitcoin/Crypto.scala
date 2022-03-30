@@ -156,7 +156,9 @@ object Crypto {
 
     def add(that: PublicKey): PublicKey = nativeSecp256k1.map { h =>
       PublicKey.fromBin(
-        ByteVector.view(h.pubKeyAdd(value.toArray, that.value.toArray))
+        ByteVector.view(
+          h.pubKeyCombine(Array(value.toArray, that.value.toArray))
+        )
       )
     } getOrElse {
       PublicKey(ecpoint.add(that.ecpoint).normalize())
@@ -173,7 +175,9 @@ object Crypto {
     def subtract(that: PublicKey): PublicKey = nativeSecp256k1.map { h =>
       PublicKey.fromBin(
         ByteVector.view(
-          h.pubKeyAdd(value.toArray, h.pubKeyNegate(that.value.toArray))
+          h.pubKeyCombine(
+            Array(value.toArray, h.pubKeyNegate(that.value.toArray))
+          )
         )
       )
     } getOrElse {

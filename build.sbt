@@ -4,7 +4,7 @@ scalaVersion          := "2.13.8"
 version               := "0.1.0"
 scalacOptions         += "-language:postfixOps"
 libraryDependencies   ++= Seq(
-  "fr.acinq.secp256k1" % "secp256k1-kmp-jni-jvm" % "0.5.2",
+  "fr.acinq.secp256k1" % "secp256k1-kmp-jni-jvm" % "0.6.3",
   "org.scodec" % "scodec-core_2.13" % "1.11.9",
   "commons-codec" % "commons-codec" % "1.10",
   "io.reactivex" % "rxscala_2.13" % "0.27.0",
