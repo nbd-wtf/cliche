@@ -2,12 +2,13 @@ package cliche
 
 import java.io.{File}
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicLong
 import scala.io.{Source}
 import scala.annotation.nowarn
 import scodec.bits.{HexStringSyntax}
-import java.util.concurrent.atomic.AtomicLong
 import akka.actor
 import com.softwaremill.quicklens._
+import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
 import fr.acinq.eclair.{MilliSatoshi}
 import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
@@ -95,14 +96,17 @@ import cliche.utils.{
   SQLiteUtils,
   ConnectionProvider => ClicheConnectionProvider
 }
-import cliche.{Commands}
+import cliche.{Commands, Config}
 
 object Main {
-  println("# initial parameters")
-  var userdir: File = new File("./data")
-  var config: Config = new Config(userdir)
+  // prevent netty/electrumclient to flood us with logs
+  InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
 
-  val sqlitedb = SQLiteUtils.getConnection
+  println("# reading config")
+  val config: Config = Config.load()
+
+  println("# initial parameters")
+  val sqlitedb = SQLiteUtils.getConnection(config.datadir)
   val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
   val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
   var txDataBag: SQLiteTx = null
