@@ -100,7 +100,7 @@ object Commands {
         }
       }
 
-    val result = command match {
+    val response = command match {
       case params: ShowError            => Left(params.err.message)
       case _: GetInfo                   => Commands.getInfo()
       case params: RequestHostedChannel => Commands.requestHC(params)
@@ -109,9 +109,18 @@ object Commands {
       case _                            => Left(s"unhandled command $command")
     }
 
-    result match {
-      case Left(err)   => printjson(("id" -> id) ~~ ("error" -> err))
-      case Right(resp) => printjson(("id" -> id) ~~ ("response" -> resp))
+    response match {
+      case Left(err) =>
+        printjson(
+          // @formatter:off
+          ("id" -> id) ~~
+          ("error" ->
+            (("message" -> err) ~~
+             ("code" -> 1))
+          )
+          // @formatter:on
+        )
+      case Right(result) => printjson(("id" -> id) ~~ ("result" -> result))
     }
   }
 
@@ -311,7 +320,10 @@ object Commands {
 
     Right(
       // @formatter:off
-      ("invoice" -> prExt.raw)
+      ("invoice" -> prExt.raw) ~~
+      ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
+      ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
+      ("hints_count" -> prExt.pr.routingInfo.size)
       // @formatter:on
     )
   }
