@@ -257,6 +257,12 @@ object Commands {
         }
     }
 
+    if (hops.size == 0) {
+      return Left(
+        "can't create invoice since you don't have any channels available for receiving"
+      )
+    }
+
     // invoice secret and fake invoice private key
     val secret = randomBytes32
     val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
