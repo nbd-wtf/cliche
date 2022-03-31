@@ -333,7 +333,7 @@ object Commands {
           .makeSendCmd(
             prExt,
             LNParams.cm.all.values.toList,
-            MilliSatoshi(2000L),
+            LNParams.cm.feeReserve(amount),
             amount
           )
           .modify(_.split.totalSum)
@@ -356,7 +356,14 @@ object Commands {
         )
 
         LNParams.cm.localSend(cmd)
-        Right(("sent" -> true))
+        Right(
+          // @formatter:off
+          ("sent" -> true) ~~
+          ("payee" -> cmd.targetNodeId.toString) ~~
+          ("fee_reserve" -> cmd.totalFeeReserve.toLong) ~~
+          ("payment_hash" -> cmd.fullTag.paymentHash.toHex)
+          // @formatter:on
+        )
       }
     }
   }
