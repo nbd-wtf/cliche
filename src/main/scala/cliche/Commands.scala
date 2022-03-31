@@ -1,8 +1,10 @@
 package cliche
 
+import scala.util.Try
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
+import org.json4s.JsonAST.JObject
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
@@ -10,9 +12,10 @@ import fr.acinq.eclair.channel.Commitments
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
+import fr.acinq.eclair.transactions.RemoteFulfill
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.ByteVector32
-import immortan.fsm.{HCOpenHandler}
+import immortan.fsm.{HCOpenHandler, OutgoingPaymentSenderData, IncomingRevealed}
 import immortan.{
   Channel,
   ChannelHosted,
@@ -28,10 +31,9 @@ import immortan.utils.PaymentRequestExt
 import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
 
-import scala.util.Try
+import cliche.Config
 
-trait Command
-
+sealed trait Command
 case class UnknownCommand() extends Command
 case class ShowError(err: caseapp.core.Error) extends Command
 case class GetInfo() extends Command
@@ -50,115 +52,123 @@ case class CheckPayment(payment_hash: String) extends Command
 object Commands {
   implicit val formats: Formats = DefaultFormats
 
-  def decode(input: String): Command = {
-    try {
-      val parsed: JValue = JsonMethods.parse(input)
-      val method = parsed \ "method"
-      val params = parsed \ "params"
+  def printjson(x: JObject): Unit =
+    println(
+      Config.prettyJSON match {
+        case false => JsonMethods.compact(JsonMethods.render(x))
+        case true  => JsonMethods.pretty(JsonMethods.render(x))
+      }
+    )
 
-      (parsed \ "method").extract[String] match {
-        case "get-info"       => params.extract[GetInfo]
-        case "request-hc"     => params.extract[RequestHostedChannel]
-        case "create-invoice" => params.extract[CreateInvoice]
-        case "pay-invoice"    => params.extract[PayInvoice]
-        case "check-invoice"  => params.extract[CheckInvoice]
-        case "check-payment"  => params.extract[CheckPayment]
-        case _                => UnknownCommand()
-      }
-    } catch {
-      case _: Throwable => {
-        val spl = input.split(" ")
-        val res = spl(0) match {
-          case "get-info"       => CaseApp.parse[GetInfo](spl.tail)
-          case "request-hc"     => CaseApp.parse[RequestHostedChannel](spl.tail)
-          case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
-          case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
-          case "check-invoice"  => CaseApp.parse[CheckInvoice](spl.tail)
-          case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
-          case _                => Right(UnknownCommand(), Seq.empty[String])
+  def handle(input: String): Unit = {
+    val (id: String, command: Command) =
+      try {
+        val parsed: JValue = JsonMethods.parse(input)
+        val id = (parsed \ "id").extract[String]
+        val method = parsed \ "method"
+        val params = parsed \ "params"
+
+        (parsed \ "method").extract[String] match {
+          case "get-info"       => (id, params.extract[GetInfo])
+          case "request-hc"     => (id, params.extract[RequestHostedChannel])
+          case "create-invoice" => (id, params.extract[CreateInvoice])
+          case "pay-invoice"    => (id, params.extract[PayInvoice])
+          case "check-invoice"  => (id, params.extract[CheckInvoice])
+          case "check-payment"  => (id, params.extract[CheckPayment])
+          case _                => (id, UnknownCommand())
         }
-        res match {
-          case Left(err)       => ShowError(err)
-          case Right((cmd, _)) => cmd
+      } catch {
+        case _: Throwable => {
+          val spl = input.split(" ")
+          val res = spl(0) match {
+            case "get-info"   => CaseApp.parse[GetInfo](spl.tail)
+            case "request-hc" => CaseApp.parse[RequestHostedChannel](spl.tail)
+            case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
+            case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
+            case "check-invoice"  => CaseApp.parse[CheckInvoice](spl.tail)
+            case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
+            case _                => Right(UnknownCommand(), Seq.empty[String])
+          }
+          res match {
+            case Left(err)       => ("", ShowError(err))
+            case Right((cmd, _)) => ("", cmd)
+          }
         }
       }
+
+    val result = command match {
+      case params: ShowError            => Left(params.err.message)
+      case _: GetInfo                   => Commands.getInfo()
+      case params: RequestHostedChannel => Commands.requestHC(params)
+      case params: CreateInvoice        => Commands.createInvoice(params)
+      case params: PayInvoice           => Commands.payInvoice(params)
+      case _                            => Left(s"unhandled command $command")
+    }
+
+    result match {
+      case Left(err)   => printjson(("id" -> id) ~~ ("error" -> err))
+      case Right(resp) => printjson(("id" -> id) ~~ ("response" -> resp))
     }
   }
 
-  def handle(command: Command): Unit = command match {
-    case params: ShowError            => Commands.showError(params)
-    case _: GetInfo                   => Commands.getInfo()
-    case params: RequestHostedChannel => Commands.requestHostedChannel(params)
-    case params: CreateInvoice        => Commands.createInvoice(params)
-    case params: PayInvoice           => Commands.payInvoice(params)
-    case _                            => println("unhandled command", command)
-  }
-
-  def showError(params: ShowError): Unit = {
-    println(params.err.message)
-  }
-
-  def getInfo(): Unit = {
-    println(
-      JsonMethods.pretty(
-        JsonMethods.render(
-          // @formatter:off
-          ("keys" ->
-            (("pub" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
-             ("priv" -> LNParams.secret.keys.ourNodePrivateKey.value.toHex) ~~
-             ("mnemonics" -> LNParams.secret.mnemonic.mkString(" ")))
-          ) ~~
-          ("block_height" -> LNParams.blockCount.get()) ~~
-          ("wallets" ->
-            LNParams.chainWallets.wallets.map { w =>
-              (("label" -> w.info.label) ~~
-               ("balance" -> w.info.lastBalance.toLong))
-            }
-          ) ~~
-          ("channels" ->
-            LNParams.cm.all.toList.map { kv =>
-              (("id" -> kv._1.toHex) ~~
-               ("balance" -> kv._2.data.ourBalance.toLong))
-            }
-          ) ~~
-          ("known_channels" ->
-            (("normal" -> Main.normalBag.getRoutingData.size) ~~
-             ("hosted" -> Main.hostedBag.getRoutingData.size))
-          ) ~~
-          ("outgoing_payments" ->
-            LNParams.cm.allInChannelOutgoing.toList.map { kv =>
-              (("hash" -> kv._1.paymentHash.toHex) ~~
-               ("htlcs" ->
-                 kv._2.map { htlcAdd =>
-                   (("id" -> htlcAdd.id) ~~
-                    ("msatoshi" -> htlcAdd.amountMsat.toLong) ~~
-                    ("channel" -> htlcAdd.channelId.toHex) ~~
-                    ("expiry" -> htlcAdd.cltvExpiry.underlying))
-                 }
-               ))
-            }
-          ) ~~
-          ("fiat_rates" -> LNParams.fiatRates.info.rates.filter {
-            case (currency: String, _) => currency == "usd"
-          }) ~~
-          ("fee_rates" ->
-            (("1" -> LNParams.feeRates.info.smoothed.feePerBlock(1).toLong) ~~
-             ("10" -> LNParams.feeRates.info.smoothed.feePerBlock(10).toLong) ~~
-             ("100" -> LNParams.feeRates.info.smoothed.feePerBlock(100).toLong))
-          )
-          // @formatter:on
-        )
+  def getInfo(): Either[String, JObject] = {
+    Right(
+      // @formatter:off
+      ("keys" ->
+        (("pub" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
+         ("priv" -> LNParams.secret.keys.ourNodePrivateKey.value.toHex) ~~
+         ("mnemonics" -> LNParams.secret.mnemonic.mkString(" ")))
+      ) ~~
+      ("block_height" -> LNParams.blockCount.get()) ~~
+      ("wallets" ->
+        LNParams.chainWallets.wallets.map { w =>
+          (("label" -> w.info.label) ~~
+           ("balance" -> w.info.lastBalance.toLong))
+        }
+      ) ~~
+      ("channels" ->
+        LNParams.cm.all.toList.map { kv =>
+          (("id" -> kv._1.toHex) ~~
+           ("balance" -> kv._2.data.ourBalance.toLong))
+        }
+      ) ~~
+      ("known_channels" ->
+        (("normal" -> Main.normalBag.getRoutingData.size) ~~
+         ("hosted" -> Main.hostedBag.getRoutingData.size))
+      ) ~~
+      ("outgoing_payments" ->
+        LNParams.cm.allInChannelOutgoing.toList.map { kv =>
+          (("hash" -> kv._1.paymentHash.toHex) ~~
+           ("htlcs" ->
+             kv._2.map { htlcAdd =>
+               (("id" -> htlcAdd.id) ~~
+                ("msatoshi" -> htlcAdd.amountMsat.toLong) ~~
+                ("channel" -> htlcAdd.channelId.toHex) ~~
+                ("expiry" -> htlcAdd.cltvExpiry.underlying))
+             }
+           ))
+        }
+      ) ~~
+      ("fiat_rates" -> LNParams.fiatRates.info.rates.filter {
+        case (currency: String, _) => currency == "usd"
+      }) ~~
+      ("fee_rates" ->
+        (("1" -> LNParams.feeRates.info.smoothed.feePerBlock(1).toLong) ~~
+         ("10" -> LNParams.feeRates.info.smoothed.feePerBlock(10).toLong) ~~
+         ("100" -> LNParams.feeRates.info.smoothed.feePerBlock(100).toLong))
       )
+      // @formatter:on
     )
   }
 
-  def requestHostedChannel(params: RequestHostedChannel): Unit = {
+  def requestHC(params: RequestHostedChannel): Either[String, JObject] = {
     val localParams =
       LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
     ByteVector.fromHex(params.pubkey) match {
-      case None                                => {}
-      case Some(pubkey) if pubkey.length != 33 => {}
+      case None => Left("invalid pubkey hex")
+      case Some(pubkey) if pubkey.length != 33 =>
+        Left("pubkey must be 33 bytes hex")
       case Some(pubkey) => {
         val target: RemoteNodeInfo = RemoteNodeInfo(
           PublicKey(pubkey),
@@ -172,37 +182,47 @@ object Commands {
           localParams.defaultFinalScriptPubKey,
           LNParams.cm
         ) {
-          println("Creating new HC handler")
-
           def onException: Unit = {
-            println("onMessage onException")
+            printjson(("event" -> "hc_creation_exception"))
           }
 
           // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
           def onFailure(reason: Throwable) = {
-            println("Failed to open HC channel")
-            println(reason)
+            printjson(
+              // @formatter:off
+              ("event" -> "hc_creation_failed") ~~
+              ("reason" -> reason.toString())
+              // @formatter:on
+            )
           }
 
           def onEstablished(cs: Commitments, freshChannel: ChannelHosted) = {
-            println("HC established")
-            // WalletApp.app.prefs.edit.putBoolean(WalletApp.OPEN_HC, false).commit
-            // WalletApp.backupSaveWorker.replaceWork(false)
+            printjson(
+              // @formatter:off
+              ("event" -> "hc_creation_succeeded") ~~
+              ("channel_id" -> cs.channelId.toHex) ~~
+              ("remote_peer" -> cs.remoteInfo.nodeId.toString)
+              // @formatter:on
+            )
+
             LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
             LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
-            // This removes all previous channel listeners
+
+            // this removes all previous channel listeners
             freshChannel.listeners = Set(LNParams.cm)
             LNParams.cm.initConnect
-            // Update view on hub activity and finalize local stuff
+
+            // update view on hub activity and finalize local stuff
             ChannelMaster.next(ChannelMaster.statusUpdateStream)
-            println("[DEBUG] HC implanted")
           }
         }
+
+        Right(("channel_being_created" -> true))
       }
     }
   }
 
-  def createInvoice(params: CreateInvoice): Unit = {
+  def createInvoice(params: CreateInvoice): Either[String, JObject] = {
     // gather params
     val preimage =
       params.preimage
@@ -279,15 +299,19 @@ object Commands {
       fiatRateSnap = Map.empty
     )
 
-    println(prExt.raw)
+    Right(
+      // @formatter:off
+      ("invoice" -> prExt.raw)
+      // @formatter:on
+    )
   }
 
-  def payInvoice(params: PayInvoice): Unit = {
+  def payInvoice(params: PayInvoice): Either[String, JObject] = {
     Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
-      case None => println("invalid invoice")
+      case None => Left("invalid invoice")
       case Some(prExt)
           if prExt.pr.amountOpt.isEmpty && params.msatoshi.isEmpty =>
-        println("missing amount")
+        Left("missing amount")
       case Some(prExt) => {
         val amount =
           params.msatoshi
@@ -322,8 +346,39 @@ object Commands {
         )
 
         LNParams.cm.localSend(cmd)
-        println("sent!")
+        Right(("sent" -> true))
       }
     }
   }
+
+  def onPaymentFailed(data: OutgoingPaymentSenderData): Unit =
+    printjson(
+      // @formatter:off
+      ("event" -> "payment_failed") ~~
+      ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
+      ("parts" -> data.parts.size) ~~
+      ("failure" -> data.failures.map(_.asString).mkString(", "))
+      // @formatter:on
+    )
+
+  def onPaymentSucceeded(
+      data: OutgoingPaymentSenderData,
+      fulfill: RemoteFulfill
+  ): Unit =
+    printjson(
+      // @formatter:off
+      ("event" -> "payment_succeeded") ~~
+      ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
+      ("parts" -> data.parts.size) ~~
+      ("fee_msatoshi" -> data.usedFee.toLong)
+      // @formatter:on
+    )
+
+  def onPaymentReceived(r: IncomingRevealed): Unit =
+    printjson(
+      // @formatter:off
+      ("event" -> "payment_received") ~~
+      ("payment_hash" -> r.fullTag.paymentHash.toHex)
+      // @formatter:on
+    )
 }

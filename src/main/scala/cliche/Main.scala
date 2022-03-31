@@ -19,7 +19,7 @@ import fr.acinq.eclair.blockchain.electrum.db.{
   WatchingWallet
 }
 import fr.acinq.eclair.router.Router
-import fr.acinq.eclair.transactions.{DirectedHtlc, RemoteFulfill}
+import fr.acinq.eclair.transactions.RemoteFulfill
 import fr.acinq.eclair.wire.{Init}
 import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
 import fr.acinq.eclair.blockchain.electrum.{
@@ -102,11 +102,8 @@ object Main {
   // prevent netty/electrumclient to flood us with logs
   InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
 
-  println("# reading config")
-  val config: Config = Config.load()
-
   println("# initial parameters")
-  val sqlitedb = SQLiteUtils.getConnection(config.datadir)
+  val sqlitedb = SQLiteUtils.getConnection(Config.datadir)
   val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
   val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
   var txDataBag: SQLiteTx = null
@@ -133,12 +130,12 @@ object Main {
 
   LNParams.logBag = new SQLiteLog(dbinterface)
 
-  config.network match {
+  Config.network match {
     case "testnet" => LNParams.chainHash = Block.TestnetGenesisBlock.hash
     case "mainnet" => LNParams.chainHash = Block.LivenetGenesisBlock.hash
     case _ =>
       println(
-        s"< impossible config.network option ${config.network}"
+        s"< impossible config.network option ${Config.network}"
       );
       sys.exit(1)
   }
@@ -155,9 +152,9 @@ object Main {
   }
 
   val walletSeed =
-    MnemonicCode.toSeed(config.seed, passphrase = new String)
+    MnemonicCode.toSeed(Config.seed, passphrase = new String)
   val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
-  val secret = WalletSecret(keys, config.seed, walletSeed)
+  val secret = WalletSecret(keys, Config.seed, walletSeed)
   extDataBag.putSecret(secret)
   LNParams.secret = secret
 
@@ -474,32 +471,26 @@ object Main {
 
   println("# listening for outgoing payments")
   LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
-    override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit = {
-      println(
-        s">> payment failed: ${data.cmd.fullTag.paymentHash} parts=${data.parts.size} failure=${data.failuresAsString}"
-      )
-    }
-
+    override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit =
+      Commands.onPaymentFailed(data)
     override def gotFirstPreimage(
         data: OutgoingPaymentSenderData,
         fulfill: RemoteFulfill
-    ): Unit = {
-      println(
-        s">> payment success: ${fulfill.ourAdd.paymentHash} preimage=${fulfill.theirPreimage} fee=${data.usedFee}"
-      )
-    }
+    ): Unit = Commands.onPaymentSucceeded(data, fulfill)
   }
 
   println("# listening for incoming payments")
   ChannelMaster.inFinalized
     .collect { case revealed: IncomingRevealed => revealed }
-    .subscribe(r => {
-      println(s">> received payment: ${r.fullTag.paymentHash.toHex}")
-    })
+    .subscribe(r => Commands.onPaymentReceived(r))
 
+  println("# waiting for commands")
   def main(args: Array[String]): Unit = {
     while (true) {
-      Commands.handle(Commands.decode(scala.io.StdIn.readLine()))
+      val line = scala.io.StdIn.readLine().trim
+      if (line.size > 0) {
+        Commands.handle(line)
+      }
     }
   }
 }
