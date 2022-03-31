@@ -54,9 +54,9 @@ object Commands {
 
   def printjson(x: JObject): Unit =
     println(
-      Config.prettyJSON match {
-        case false => JsonMethods.compact(JsonMethods.render(x))
-        case true  => JsonMethods.pretty(JsonMethods.render(x))
+      Config.compactJSON match {
+        case true  => JsonMethods.compact(JsonMethods.render(x))
+        case false => JsonMethods.pretty(JsonMethods.render(x))
       }
     )
 
@@ -64,7 +64,11 @@ object Commands {
     val (id: String, command: Command) =
       try {
         val parsed: JValue = JsonMethods.parse(input)
-        val id = (parsed \ "id").extract[String]
+        val id =
+          (
+            try { (parsed \ "id").extract[String] }
+            catch { case _: Throwable => "" }
+          )
         val method = parsed \ "method"
         val params = parsed \ "params"
 

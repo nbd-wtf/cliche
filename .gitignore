@@ -10,3 +10,4 @@ debug.log
 .bloop/
 project/metals.sbt
 project/project
+data/

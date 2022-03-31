@@ -17,5 +17,7 @@ object Config {
 
   val network = c.as[String]("cliche.network")
   val seed = c.as[String]("cliche.seed").split(" ").toList
-  val prettyJSON = c.as[Boolean]("cliche.json.pretty")
+  val compactJSON = c.as[Boolean]("cliche.json.compact")
+
+  println(s"# configs: network=$network json.compact=$compactJSON")
 }
