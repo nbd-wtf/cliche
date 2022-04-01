@@ -397,17 +397,22 @@ object Commands {
           case 3 => "complete"
         }
 
+        val msatoshi = info.isIncoming match {
+          case true  => info.received.toLong
+          case false => info.sent.toLong
+        }
+
         Right(
           // @formatter:off
           ("status" -> status) ~~
           ("seen_at" -> info.seenAt) ~~
           ("invoice" -> info.prString) ~~
           ("preimage" -> info.preimage.toHex) ~~
+          ("msatoshi" -> msatoshi) ~~
           ("updated_at" -> info.updatedAt) ~~
+          ("is_incoming" -> info.isIncoming) ~~
           ("fee_msatoshi" -> info.fee.toLong) ~~
-          ("payment_hash" -> info.paymentHash.toHex) ~~
-          ("msatoshi_sent" -> info.sent.toLong) ~~
-          ("msatoshi_received" -> info.received.toLong)
+          ("payment_hash" -> info.paymentHash.toHex)
           // @formatter:on
         )
       }
