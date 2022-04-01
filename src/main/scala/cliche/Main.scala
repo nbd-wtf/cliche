@@ -311,8 +311,6 @@ object Main {
     override def onWalletReady(
         blockCountEvent: ElectrumWallet.WalletReady
     ): Unit = {
-      Commands.onReady()
-
       LNParams.synchronized {
         val sameXPub: ElectrumEclairWallet => Boolean =
           _.ewt.xPub == blockCountEvent.xPub
@@ -489,6 +487,8 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     println("# waiting for commands")
+    Commands.onReady()
+
     while (true) {
       val line = scala.io.StdIn.readLine().trim
       if (line.size > 0) {
