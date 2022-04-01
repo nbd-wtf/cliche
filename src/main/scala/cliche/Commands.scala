@@ -47,7 +47,7 @@ case class CreateInvoice(
 ) extends Command
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
 case class CheckInvoice(id: String) extends Command
-case class CheckPayment(payment_hash: String) extends Command
+case class CheckPayment(hash: String) extends Command
 
 object Commands {
   implicit val formats: Formats = DefaultFormats
@@ -77,7 +77,6 @@ object Commands {
           case "request-hc"     => (id, params.extract[RequestHostedChannel])
           case "create-invoice" => (id, params.extract[CreateInvoice])
           case "pay-invoice"    => (id, params.extract[PayInvoice])
-          case "check-invoice"  => (id, params.extract[CheckInvoice])
           case "check-payment"  => (id, params.extract[CheckPayment])
           case _                => (id, UnknownCommand())
         }
@@ -89,7 +88,6 @@ object Commands {
             case "request-hc" => CaseApp.parse[RequestHostedChannel](spl.tail)
             case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
             case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
-            case "check-invoice"  => CaseApp.parse[CheckInvoice](spl.tail)
             case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
             case _                => Right(UnknownCommand(), Seq.empty[String])
           }
@@ -102,10 +100,11 @@ object Commands {
 
     val response = command match {
       case params: ShowError            => Left(params.err.message)
-      case _: GetInfo                   => Commands.getInfo()
-      case params: RequestHostedChannel => Commands.requestHC(params)
-      case params: CreateInvoice        => Commands.createInvoice(params)
-      case params: PayInvoice           => Commands.payInvoice(params)
+      case _: GetInfo                   => getInfo()
+      case params: RequestHostedChannel => requestHC(params)
+      case params: CreateInvoice        => createInvoice(params)
+      case params: PayInvoice           => payInvoice(params)
+      case params: CheckPayment         => checkPayment(params)
       case _                            => Left(s"unhandled command $command")
     }
 
@@ -380,6 +379,43 @@ object Commands {
     }
   }
 
+  def checkPayment(params: CheckPayment): Either[String, JObject] = {
+    val maybeInfo = for {
+      bytes <- ByteVector.fromHex(params.hash)
+      hash <- Try(ByteVector32(bytes)).toOption
+      info <- LNParams.cm.payBag
+        .getPaymentInfo(hash)
+        .toOption
+    } yield info
+
+    maybeInfo match {
+      case Some(info) => {
+        val status = info.status match {
+          case 0 => "initial"
+          case 1 => "pending"
+          case 2 => "failed"
+          case 3 => "complete"
+        }
+
+        Right(
+          // @formatter:off
+          ("status" -> status) ~~
+          ("seen_at" -> info.seenAt) ~~
+          ("invoice" -> info.prString) ~~
+          ("preimage" -> info.preimage.toHex) ~~
+          ("updated_at" -> info.updatedAt) ~~
+          ("fee_msatoshi" -> info.fee.toLong) ~~
+          ("payment_hash" -> info.paymentHash.toHex) ~~
+          ("msatoshi_sent" -> info.sent.toLong) ~~
+          ("msatoshi_received" -> info.received.toLong)
+          // @formatter:on
+        )
+      }
+      case None =>
+        Left(s"couldn't get payment '${params.hash}' from database")
+    }
+  }
+
   def onPaymentFailed(data: OutgoingPaymentSenderData): Unit =
     printjson(
       // @formatter:off
@@ -393,23 +429,36 @@ object Commands {
   def onPaymentSucceeded(
       data: OutgoingPaymentSenderData,
       fulfill: RemoteFulfill
-  ): Unit =
+  ): Unit = {
+    val msatoshi =
+      data.inFlightParts.map(_.cmd.firstAmount.toLong).fold[Long](0)(_ + _)
+
     printjson(
       // @formatter:off
       ("event" -> "payment_succeeded") ~~
       ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
-      ("parts" -> data.parts.size) ~~
-      ("fee_msatoshi" -> data.usedFee.toLong)
+      ("fee_msatoshi" -> data.usedFee.toLong) ~~
+      ("msatoshi" -> msatoshi) ~~
+      ("preimage" -> fulfill.theirPreimage.toHex) ~~
+      ("parts" -> data.parts.size)
       // @formatter:on
     )
+  }
 
-  def onPaymentReceived(r: IncomingRevealed): Unit =
-    printjson(
-      // @formatter:off
-      ("event" -> "payment_received") ~~
-      ("payment_hash" -> r.fullTag.paymentHash.toHex)
-      // @formatter:on
-    )
+  def onPaymentReceived(r: IncomingRevealed): Unit = {
+    LNParams.cm.payBag.getPaymentInfo(r.fullTag.paymentHash).toOption match {
+      case Some(info) =>
+        printjson(
+          // @formatter:off
+          ("event" -> "payment_received") ~~
+          ("preimage" -> info.preimage.toHex) ~~
+          ("msatoshi" -> info.received.toLong) ~~
+          ("payment_hash" -> r.fullTag.paymentHash.toHex)
+          // @formatter:on
+        )
+      case None => {}
+    }
+  }
 
   def onReady(): Unit = printjson(("event" -> "ready"))
 }
