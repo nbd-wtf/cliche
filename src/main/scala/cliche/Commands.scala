@@ -410,4 +410,6 @@ object Commands {
       ("payment_hash" -> r.fullTag.paymentHash.toHex)
       // @formatter:on
     )
+
+  def onReady(): Unit = printjson(("event" -> "ready"))
 }

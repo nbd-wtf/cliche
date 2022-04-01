@@ -310,7 +310,9 @@ object Main {
 
     override def onWalletReady(
         blockCountEvent: ElectrumWallet.WalletReady
-    ): Unit =
+    ): Unit = {
+      Commands.onReady()
+
       LNParams.synchronized {
         val sameXPub: ElectrumEclairWallet => Boolean =
           _.ewt.xPub == blockCountEvent.xPub
@@ -324,6 +326,7 @@ object Main {
           )
         }
       }
+    }
 
     override def onChainMasterSelected(addr: InetSocketAddress): Unit =
       currentChainNode = addr.asSome
@@ -484,8 +487,8 @@ object Main {
     .collect { case revealed: IncomingRevealed => revealed }
     .subscribe(r => Commands.onPaymentReceived(r))
 
-  println("# waiting for commands")
   def main(args: Array[String]): Unit = {
+    println("# waiting for commands")
     while (true) {
       val line = scala.io.StdIn.readLine().trim
       if (line.size > 0) {
