@@ -386,7 +386,7 @@ object Commands {
       ("event" -> "payment_failed") ~~
       ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
       ("parts" -> data.parts.size) ~~
-      ("failure" -> data.failures.map(_.asString).mkString(", "))
+      ("failure" -> data.failures.map(_.asString))
       // @formatter:on
     )
 
