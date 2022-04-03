@@ -139,10 +139,39 @@ object Commands {
         }
       ) ~~
       ("channels" ->
-        LNParams.cm.all.toList.map { kv =>
-          (("id" -> kv._1.toHex) ~~
-           ("balance" -> kv._2.data.ourBalance.toLong))
-        }
+        LNParams.cm.all.toList.map { kv => {
+          val peer = kv._1
+          val chan = kv._2
+          val commits = Channel.chanAndCommitsOpt(chan).map(_.commits)
+
+          (("id" -> commits.map(_.channelId.toHex)) ~~
+           ("peer" -> peer.toHex) ~~
+           ("balance" -> chan.data.ourBalance.toLong) ~~
+           ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
+           ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
+           ("status" -> (
+             if (Channel.isOperationalAndOpen(chan)) { "open" }
+             else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
+             else if (Channel.isWaiting(chan)) { "waiting" }
+             else "unknown"
+           )) ~~
+           ("policy" ->
+             commits.flatMap(_.updateOpt).map(u =>
+              (("base_fee" -> u.feeBaseMsat.toLong) ~~
+               ("fee_per_millionth" -> u.feeProportionalMillionths) ~~
+               ("cltv_delta" -> u.cltvExpiryDelta.underlying) ~~
+               ("htlc_min" -> u.htlcMinimumMsat.toLong) ~~
+               ("htlc_max" -> u.htlcMaximumMsat.map(_.toLong)))
+             )
+           ) ~~
+           ("inflight" ->
+             commits.map(c =>
+               (("outgoing" -> c.allOutgoing.size) ~~
+                ("incoming" -> c.crossSignedIncoming.size) ~~
+                ("revealed" -> c.revealedFulfills.size))
+             )
+           ))
+        }}
       ) ~~
       ("known_channels" ->
         (("normal" -> Main.normalBag.getRoutingData.size) ~~
