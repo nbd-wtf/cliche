@@ -116,7 +116,10 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit
     ): Unit = {
       val listener = new ChannelFutureListener {
         override def operationComplete(future: ChannelFuture): Unit =
-          if (!future.isSuccess) self ! Close
+          if (!future.isSuccess) {
+            ctx.close()
+            self ! Close
+          }
       }
       ctx.connect(remoteAddress, localAddress, promise addListener listener)
     }
@@ -127,8 +130,12 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit
         promise: ChannelPromise
     ): Unit = {
       val listener = new ChannelFutureListener {
-        override def operationComplete(future: ChannelFuture): Unit =
-          if (!future.isSuccess) self ! Close
+        override def operationComplete(future: ChannelFuture): Unit = {
+          if (!future.isSuccess) {
+            ctx.close()
+            self ! Close
+          }
+        }
       }
       ctx.write(msg, promise addListener listener)
     }
@@ -136,7 +143,10 @@ class ElectrumClient(serverAddress: InetSocketAddress, ssl: SSL)(implicit
     override def exceptionCaught(
         ctx: ChannelHandlerContext,
         cause: Throwable
-    ): Unit = self ! Close
+    ): Unit = {
+      ctx.close()
+      self ! Close
+    }
   }
 
   class ElectrumResponseDecoder extends MessageToMessageDecoder[String] {
