@@ -13,8 +13,6 @@ libraryDependencies   ++= Seq(
   "org.json4s" % "json4s-native_2.13" % "3.6.7", // electrum,
   "io.spray" % "spray-json_2.13" % "1.3.5", // immortan,
   "com.typesafe.akka" % "akka-actor_2.13" % "2.6.9", // immortan + eclair
-  "com.typesafe.akka" % "akka-slf4j_2.13" % "2.6.9", // cliche (because akka is awful)
-  "ch.qos.logback" % "logback-classic" % "1.2.10", // cliche (idem)
   "io.netty" % "netty-all" % "4.1.42.Final", // electrum
   "com.softwaremill.quicklens" % "quicklens_2.13" % "1.8.4", // immortan
   "org.bouncycastle" % "bcprov-jdk15to18" % "1.68", // eclair
