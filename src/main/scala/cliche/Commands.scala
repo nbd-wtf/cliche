@@ -31,7 +31,7 @@ import immortan.utils.PaymentRequestExt
 import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
 
-import cliche.Config
+import cliche.{Config, DB}
 
 sealed trait Command
 case class UnknownCommand() extends Command
@@ -174,8 +174,8 @@ object Commands {
         }}
       ) ~~
       ("known_channels" ->
-        (("normal" -> Main.normalBag.getRoutingData.size) ~~
-         ("hosted" -> Main.hostedBag.getRoutingData.size))
+        (("normal" -> DB.normalBag.getRoutingData.size) ~~
+         ("hosted" -> DB.hostedBag.getRoutingData.size))
       ) ~~
       ("outgoing_payments" ->
         LNParams.cm.allInChannelOutgoing.toList.map { kv =>
