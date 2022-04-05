@@ -78,7 +78,8 @@ object Main {
     // prevent netty/electrumclient to flood us with logs
     InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
 
-    println("# load objects")
+    // print the configs we read
+    Config.print()
 
     println("# initializing parameters")
     var currentChainNode: Option[InetSocketAddress] = None
@@ -89,9 +90,7 @@ object Main {
     var lastNormalResyncStamp: Long = 0L
 
     LNParams.connectionProvider = new ClicheConnectionProvider
-
     CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
-
     LNParams.logBag = DB.logBag
 
     Config.network match {

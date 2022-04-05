@@ -19,5 +19,7 @@ object Config {
   val seed = c.as[String]("cliche.seed").split(" ").toList
   val compactJSON = c.as[Boolean]("cliche.json.compact")
 
-  println(s"# configs: network=$network json.compact=$compactJSON")
+  def print(): Unit = {
+    println(s"# loaded configs: network=$network json.compact=$compactJSON")
+  }
 }
