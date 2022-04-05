@@ -126,11 +126,7 @@ object Commands {
   def getInfo(): Either[String, JObject] = {
     Right(
       // @formatter:off
-      ("keys" ->
-        (("pub" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
-         ("priv" -> LNParams.secret.keys.ourNodePrivateKey.value.toHex) ~~
-         ("mnemonics" -> LNParams.secret.mnemonic.mkString(" ")))
-      ) ~~
+      ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
       ("block_height" -> LNParams.blockCount.get()) ~~
       ("wallets" ->
         LNParams.chainWallets.wallets.map { w =>
