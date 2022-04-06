@@ -4,7 +4,7 @@ import scala.util.Try
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
-import org.json4s.JsonAST.JObject
+import org.json4s.JsonAST.{JValue, JArray}
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
@@ -25,7 +25,8 @@ import immortan.{
   LNParams,
   PathFinder,
   PaymentDescription,
-  RemoteNodeInfo
+  RemoteNodeInfo,
+  PaymentInfo
 }
 import immortan.utils.PaymentRequestExt
 import immortan.crypto.Tools.{~}
@@ -46,13 +47,13 @@ case class CreateInvoice(
     preimage: Option[String]
 ) extends Command
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
-case class CheckInvoice(id: String) extends Command
 case class CheckPayment(hash: String) extends Command
+case class ListPayments(count: Option[Int]) extends Command
 
 object Commands {
   implicit val formats: Formats = DefaultFormats
 
-  def printjson(x: JObject): Unit =
+  def printjson(x: JValue): Unit =
     println(
       Config.compactJSON match {
         case true  => JsonMethods.compact(JsonMethods.render(x))
@@ -78,6 +79,7 @@ object Commands {
           case "create-invoice" => (id, params.extract[CreateInvoice])
           case "pay-invoice"    => (id, params.extract[PayInvoice])
           case "check-payment"  => (id, params.extract[CheckPayment])
+          case "list-payments"  => (id, params.extract[ListPayments])
           case _                => (id, UnknownCommand())
         }
       } catch {
@@ -89,6 +91,7 @@ object Commands {
             case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
             case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
             case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
+            case "list-payments"  => CaseApp.parse[ListPayments](spl.tail)
             case _                => Right(UnknownCommand(), Seq.empty[String])
           }
           res match {
@@ -105,6 +108,7 @@ object Commands {
       case params: CreateInvoice        => createInvoice(params)
       case params: PayInvoice           => payInvoice(params)
       case params: CheckPayment         => checkPayment(params)
+      case params: ListPayments         => listPayments(params)
       case _                            => Left(s"unhandled command $command")
     }
 
@@ -123,7 +127,7 @@ object Commands {
     }
   }
 
-  def getInfo(): Either[String, JObject] = {
+  def getInfo(): Either[String, JValue] = {
     Right(
       // @formatter:off
       ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
@@ -198,7 +202,7 @@ object Commands {
     )
   }
 
-  def requestHC(params: RequestHostedChannel): Either[String, JObject] = {
+  def requestHC(params: RequestHostedChannel): Either[String, JValue] = {
     val localParams =
       LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
@@ -259,7 +263,7 @@ object Commands {
     }
   }
 
-  def createInvoice(params: CreateInvoice): Either[String, JObject] = {
+  def createInvoice(params: CreateInvoice): Either[String, JValue] = {
     // gather params
     val preimage =
       params.preimage
@@ -352,7 +356,7 @@ object Commands {
     )
   }
 
-  def payInvoice(params: PayInvoice): Either[String, JObject] = {
+  def payInvoice(params: PayInvoice): Either[String, JValue] = {
     Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
       case None => Left("invalid invoice")
       case Some(prExt)
@@ -404,7 +408,7 @@ object Commands {
     }
   }
 
-  def checkPayment(params: CheckPayment): Either[String, JObject] = {
+  def checkPayment(params: CheckPayment): Either[String, JValue] = {
     val maybeInfo = for {
       bytes <- ByteVector.fromHex(params.hash)
       hash <- Try(ByteVector32(bytes)).toOption
@@ -414,36 +418,47 @@ object Commands {
     } yield info
 
     maybeInfo match {
-      case Some(info) => {
-        val status = info.status match {
-          case 0 => "initial"
-          case 1 => "pending"
-          case 2 => "failed"
-          case 3 => "complete"
-        }
-
-        val msatoshi = info.isIncoming match {
-          case true  => info.received.toLong
-          case false => info.sent.toLong
-        }
-
-        Right(
-          // @formatter:off
-          ("status" -> status) ~~
-          ("seen_at" -> info.seenAt) ~~
-          ("invoice" -> info.prString) ~~
-          ("preimage" -> info.preimage.toHex) ~~
-          ("msatoshi" -> msatoshi) ~~
-          ("updated_at" -> info.updatedAt) ~~
-          ("is_incoming" -> info.isIncoming) ~~
-          ("fee_msatoshi" -> info.fee.toLong) ~~
-          ("payment_hash" -> info.paymentHash.toHex)
-          // @formatter:on
-        )
-      }
-      case None =>
-        Left(s"couldn't get payment '${params.hash}' from database")
+      case Some(info) => Right(paymentAsJSON(info))
+      case None => Left(s"couldn't get payment '${params.hash}' from database")
     }
+  }
+
+  def listPayments(params: ListPayments): Either[String, JValue] = {
+    Right(
+      JArray(
+        LNParams.cm.payBag
+          .listRecentPayments(params.count.getOrElse(5))
+          .map(LNParams.cm.payBag.toPaymentInfo)
+          .map(paymentAsJSON)
+          .toList
+      )
+    )
+  }
+
+  private def paymentAsJSON(info: PaymentInfo): JValue = {
+    val msatoshi = info.isIncoming match {
+      case true  => info.received.toLong
+      case false => info.sent.toLong
+    }
+
+    val status = info.status match {
+      case 0 => "initial"
+      case 1 => "pending"
+      case 2 => "failed"
+      case 3 => "complete"
+    }
+
+    // @formatter:off
+    (("is_incoming" -> info.isIncoming) ~~
+     ("status" -> status) ~~
+     ("seen_at" -> info.seenAt) ~~
+     ("invoice" -> info.prString) ~~
+     ("preimage" -> info.preimage.toHex) ~~
+     ("msatoshi" -> msatoshi) ~~
+     ("updated_at" -> info.updatedAt) ~~
+     ("fee_msatoshi" -> info.fee.toLong) ~~
+     ("payment_hash" -> info.paymentHash.toHex))
+    // @formatter:on
   }
 
   def onPaymentFailed(data: OutgoingPaymentSenderData): Unit =
