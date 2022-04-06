@@ -4,11 +4,11 @@ import scala.util.Try
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
-import org.json4s.JsonAST.{JValue, JArray}
+import org.json4s.JsonAST.{JValue, JObject, JArray}
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
-import fr.acinq.eclair.channel.Commitments
+import fr.acinq.eclair.channel.{Commitments, NormalCommits}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
@@ -19,6 +19,7 @@ import immortan.fsm.{HCOpenHandler, OutgoingPaymentSenderData, IncomingRevealed}
 import immortan.{
   Channel,
   ChannelHosted,
+  HostedCommits,
   ChannelMaster,
   CommitsAndMax,
   ChanAndCommits,
@@ -128,6 +129,7 @@ object Commands {
   }
 
   def getInfo(): Either[String, JValue] = {
+
     Right(
       // @formatter:off
       ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
@@ -139,39 +141,7 @@ object Commands {
         }
       ) ~~
       ("channels" ->
-        LNParams.cm.all.toList.map { kv => {
-          val peer = kv._1
-          val chan = kv._2
-          val commits = Channel.chanAndCommitsOpt(chan).map(_.commits)
-
-          (("id" -> commits.map(_.channelId.toHex)) ~~
-           ("peer" -> peer.toHex) ~~
-           ("balance" -> chan.data.ourBalance.toLong) ~~
-           ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
-           ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
-           ("status" -> (
-             if (Channel.isOperationalAndOpen(chan)) { "open" }
-             else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
-             else if (Channel.isWaiting(chan)) { "waiting" }
-             else "unknown"
-           )) ~~
-           ("policy" ->
-             commits.flatMap(_.updateOpt).map(u =>
-              (("base_fee" -> u.feeBaseMsat.toLong) ~~
-               ("fee_per_millionth" -> u.feeProportionalMillionths) ~~
-               ("cltv_delta" -> u.cltvExpiryDelta.underlying) ~~
-               ("htlc_min" -> u.htlcMinimumMsat.toLong) ~~
-               ("htlc_max" -> u.htlcMaximumMsat.map(_.toLong)))
-             )
-           ) ~~
-           ("inflight" ->
-             commits.map(c =>
-               (("outgoing" -> c.allOutgoing.size) ~~
-                ("incoming" -> c.crossSignedIncoming.size) ~~
-                ("revealed" -> c.revealedFulfills.size))
-             )
-           ))
-        }}
+        LNParams.cm.all.values.map(channelAsJSON)
       ) ~~
       ("known_channels" ->
         (("normal" -> DB.normalBag.getRoutingData.size) ~~
@@ -433,6 +403,57 @@ object Commands {
           .toList
       )
     )
+  }
+
+  private def channelAsJSON(chan: Channel): JValue = {
+    val commits = Channel.chanAndCommitsOpt(chan).map(_.commits)
+
+    val specificNormalOrHostedStuff: JObject = commits match {
+      case Some(hc: HostedCommits) =>
+        // @formatter:off
+        ("hosted_channel" ->
+          (("override_proposal" -> hc.overrideProposal.map(_.localBalanceMsat.toLong)) ~~
+           ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
+        )
+        // @formatter:on
+      case Some(nc: NormalCommits) => ("normal_channel" -> "work in progress")
+      case None =>
+        ("pending_channel" -> "we don't have any commitments for this one yet")
+      case _ =>
+        ("weird_channel" -> "we don't really know what channel type this is")
+    }
+
+    // @formatter:off
+    (("id" -> commits.map(_.channelId.toHex)) ~~
+     ("peer" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
+     ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
+     ("balance" -> chan.data.ourBalance.toLong) ~~
+     ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
+     ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
+     ("status" -> (
+       if (Channel.isOperationalAndOpen(chan)) { "open" }
+       else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
+       else if (Channel.isWaiting(chan)) { "waiting" }
+       else "unknown"
+     )) ~~
+     ("policy" ->
+       commits.flatMap(_.updateOpt).map(u =>
+        (("base_fee" -> u.feeBaseMsat.toLong) ~~
+         ("fee_per_millionth" -> u.feeProportionalMillionths) ~~
+         ("cltv_delta" -> u.cltvExpiryDelta.underlying) ~~
+         ("htlc_min" -> u.htlcMinimumMsat.toLong) ~~
+         ("htlc_max" -> u.htlcMaximumMsat.map(_.toLong)))
+       )
+     ) ~~
+     ("inflight" ->
+       commits.map(c =>
+         (("outgoing" -> c.allOutgoing.size) ~~
+          ("incoming" -> c.crossSignedIncoming.size) ~~
+          ("revealed" -> c.revealedFulfills.size))
+       )
+     ) ~~
+     specificNormalOrHostedStuff)
+    // @formatter:on
   }
 
   private def paymentAsJSON(info: PaymentInfo): JValue = {
