@@ -8,7 +8,11 @@ import org.json4s.JsonAST.{JValue, JObject, JArray}
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
-import fr.acinq.eclair.channel.{Commitments, NormalCommits}
+import fr.acinq.eclair.channel.{
+  Commitments,
+  NormalCommits,
+  CMD_HOSTED_STATE_OVERRIDE
+}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
@@ -53,6 +57,7 @@ case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
 case class CheckPayment(hash: String) extends Command
 case class ListPayments(count: Option[Int]) extends Command
 case class RemoveHostedChannel(id: String) extends Command
+case class AcceptOverride(channelId: String) extends Command
 
 object Commands {
   implicit val formats: Formats = DefaultFormats
@@ -78,14 +83,15 @@ object Commands {
         val params = parsed \ "params"
 
         (parsed \ "method").extract[String] match {
-          case "get-info"       => (id, params.extract[GetInfo])
-          case "request-hc"     => (id, params.extract[RequestHostedChannel])
-          case "create-invoice" => (id, params.extract[CreateInvoice])
-          case "pay-invoice"    => (id, params.extract[PayInvoice])
-          case "check-payment"  => (id, params.extract[CheckPayment])
-          case "list-payments"  => (id, params.extract[ListPayments])
-          case "remove-hc"      => (id, params.extract[RemoveHostedChannel])
-          case _                => (id, UnknownCommand())
+          case "get-info"        => (id, params.extract[GetInfo])
+          case "request-hc"      => (id, params.extract[RequestHostedChannel])
+          case "create-invoice"  => (id, params.extract[CreateInvoice])
+          case "pay-invoice"     => (id, params.extract[PayInvoice])
+          case "check-payment"   => (id, params.extract[CheckPayment])
+          case "list-payments"   => (id, params.extract[ListPayments])
+          case "remove-hc"       => (id, params.extract[RemoveHostedChannel])
+          case "accept-override" => (id, params.extract[AcceptOverride])
+          case _                 => (id, UnknownCommand())
         }
       } catch {
         case _: Throwable => {
@@ -98,7 +104,8 @@ object Commands {
             case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
             case "list-payments"  => CaseApp.parse[ListPayments](spl.tail)
             case "remove-hc" => CaseApp.parse[RemoveHostedChannel](spl.tail)
-            case _           => Right(UnknownCommand(), Seq.empty[String])
+            case "accept-override" => CaseApp.parse[AcceptOverride](spl.tail)
+            case _                 => Right(UnknownCommand(), Seq.empty[String])
           }
           res match {
             case Left(err)       => ("", ShowError(err))
@@ -116,6 +123,7 @@ object Commands {
       case params: CheckPayment         => checkPayment(params)
       case params: ListPayments         => listPayments(params)
       case params: RemoveHostedChannel  => removeHC(params)
+      case params: AcceptOverride       => acceptOverride(params)
       case _                            => Left(s"unhandled command $command")
     }
 
@@ -421,8 +429,6 @@ object Commands {
     } yield commits
 
     maybeCommits match {
-      case None =>
-        Left(s"invalid or unknown channel id ${params.id}")
       case Some(hc) => {
         LNParams.cm.chanBag.delete(hc.channelId)
         LNParams.cm.all -= hc.channelId
@@ -430,6 +436,27 @@ object Commands {
         CommsTower.disconnectNative(hc.remoteInfo)
         Right(("closed" -> true))
       }
+      case None =>
+        Left(s"invalid or unknown channel id ${params.id}")
+    }
+  }
+
+  def acceptOverride(params: AcceptOverride): Either[String, JValue] = {
+    val maybeChanAndCommits = for {
+      bytes <- ByteVector.fromHex(params.channelId)
+      channelId <- Try(ByteVector32(bytes)).toOption
+      chan <- LNParams.cm.all.get(channelId)
+      chanAndCommits <- Channel.chanAndCommitsOpt(chan)
+      commits = chanAndCommits.commits
+    } yield (chan, commits)
+
+    maybeChanAndCommits match {
+      case Some((chan: Channel, hc: HostedCommits)) => {
+        chan.process(CMD_HOSTED_STATE_OVERRIDE(hc.overrideProposal.get))
+        Right(("accepted" -> true))
+      }
+      case _ =>
+        Left(s"invalid or unknown hosted channel id ${params.channelId}")
     }
   }
 
