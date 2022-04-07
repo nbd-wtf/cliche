@@ -27,7 +27,8 @@ import immortan.{
   PathFinder,
   PaymentDescription,
   RemoteNodeInfo,
-  PaymentInfo
+  PaymentInfo,
+  CommsTower
 }
 import immortan.utils.PaymentRequestExt
 import immortan.crypto.Tools.{~}
@@ -50,6 +51,7 @@ case class CreateInvoice(
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
 case class CheckPayment(hash: String) extends Command
 case class ListPayments(count: Option[Int]) extends Command
+case class RemoveHostedChannel(id: String) extends Command
 
 object Commands {
   implicit val formats: Formats = DefaultFormats
@@ -81,6 +83,7 @@ object Commands {
           case "pay-invoice"    => (id, params.extract[PayInvoice])
           case "check-payment"  => (id, params.extract[CheckPayment])
           case "list-payments"  => (id, params.extract[ListPayments])
+          case "remove-hc"      => (id, params.extract[RemoveHostedChannel])
           case _                => (id, UnknownCommand())
         }
       } catch {
@@ -93,7 +96,8 @@ object Commands {
             case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
             case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
             case "list-payments"  => CaseApp.parse[ListPayments](spl.tail)
-            case _                => Right(UnknownCommand(), Seq.empty[String])
+            case "remove-hc" => CaseApp.parse[RemoveHostedChannel](spl.tail)
+            case _           => Right(UnknownCommand(), Seq.empty[String])
           }
           res match {
             case Left(err)       => ("", ShowError(err))
@@ -110,6 +114,7 @@ object Commands {
       case params: PayInvoice           => payInvoice(params)
       case params: CheckPayment         => checkPayment(params)
       case params: ListPayments         => listPayments(params)
+      case params: RemoveHostedChannel  => removeHC(params)
       case _                            => Left(s"unhandled command $command")
     }
 
@@ -403,6 +408,28 @@ object Commands {
           .toList
       )
     )
+  }
+
+  def removeHC(params: RemoveHostedChannel): Either[String, JValue] = {
+    val maybeCommits = for {
+      bytes <- ByteVector.fromHex(params.id)
+      channelId <- Try(ByteVector32(bytes)).toOption
+      chan <- LNParams.cm.all.get(channelId)
+      chanAndCommits <- Channel.chanAndCommitsOpt(chan)
+      commits = chanAndCommits.commits
+    } yield commits
+
+    maybeCommits match {
+      case None =>
+        Left(s"invalid or unknown channel id ${params.id}")
+      case Some(hc) => {
+        LNParams.cm.chanBag.delete(hc.channelId)
+        LNParams.cm.all -= hc.channelId
+        ChannelMaster.next(ChannelMaster.stateUpdateStream)
+        CommsTower.disconnectNative(hc.remoteInfo)
+        Right(("closed" -> true))
+      }
+    }
   }
 
   private def channelAsJSON(chan: Channel): JValue = {
