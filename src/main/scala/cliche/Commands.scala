@@ -425,8 +425,11 @@ object Commands {
 
     // @formatter:off
     (("id" -> commits.map(_.channelId.toHex)) ~~
-     ("peer" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
-     ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
+     ("peer" ->
+       (("pubkey" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
+        ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
+        ("addr" -> commits.map(_.remoteInfo.address.toString())))
+     ) ~~
      ("balance" -> chan.data.ourBalance.toLong) ~~
      ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
      ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
