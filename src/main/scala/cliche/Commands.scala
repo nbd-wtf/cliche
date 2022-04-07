@@ -46,7 +46,8 @@ case class CreateInvoice(
     description: Option[String],
     description_hash: Option[String],
     msatoshi: Option[Long],
-    preimage: Option[String]
+    preimage: Option[String],
+    label: Option[String]
 ) extends Command
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
 case class CheckPayment(hash: String) extends Command
@@ -313,9 +314,9 @@ object Commands {
       preimage = preimage,
       description = PaymentDescription(
         split = None,
-        label = None,
+        label = params.label,
         semanticOrder = None,
-        invoiceText = ""
+        invoiceText = params.description.getOrElse("")
       ),
       balanceSnap = MilliSatoshi(0L),
       fiatRateSnap = Map.empty
