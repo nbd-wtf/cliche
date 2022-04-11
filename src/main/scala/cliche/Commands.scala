@@ -1,6 +1,6 @@
 package cliche
 
-import scala.util.Try
+import scala.util.{Try, Random}
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
@@ -267,16 +267,19 @@ object Commands {
         )
 
     // get our route hints
-    val hops = LNParams.cm.maxReceivable(
-      LNParams.cm sortedReceivable LNParams.cm.all.values
-    ) match {
-      case None => List()
-      case Some(CommitsAndMax(allowedChans, _)) =>
-        allowedChans.map(_.commits.updateOpt).zip(allowedChans).collect {
-          case Some(usableUpdate) ~ ChanAndCommits(_, commits) =>
-            usableUpdate.extraHop(commits.remoteInfo.nodeId) :: Nil
+    val hops = Random.shuffle(
+      LNParams.cm.all.values
+        .flatMap(Channel.chanAndCommitsOpt(_))
+        .map(chanAndCommits =>
+          (
+            chanAndCommits.commits.updateOpt,
+            chanAndCommits.commits.remoteInfo.nodeId
+          )
+        )
+        .collect { case Some(usableUpdate) ~ nodeId =>
+          usableUpdate.extraHop(nodeId) :: Nil
         }
-    }
+    )
 
     if (hops.size == 0) {
       return Left(
