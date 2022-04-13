@@ -20,11 +20,7 @@ libraryDependencies   ++= Seq(
   "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13", // cliche
   "com.lihaoyi" % "requests_2.13" % "0.7.0", // cliche
   "com.iheart" % "ficus_2.13" % "1.5.0", // cliche
-  "org.xerial" % "sqlite-jdbc" % "3.27.2.1", // cliche
-
-  // testing
-  "org.scalatest" % "scalatest_2.13" % "3.1.1" % Test,
-  "com.typesafe.akka" % "akka-testkit_2.13" % "2.6.9" % Test
+  "org.xerial" % "sqlite-jdbc" % "3.27.2.1" // cliche
 )
 assemblyMergeStrategy := {
   case x if x.endsWith("module-info.class") => MergeStrategy.discard
