@@ -154,6 +154,9 @@ object Commands {
            ("balance" -> w.info.lastBalance.toLong))
         }
       ) ~~
+      ("channels_total_balance" ->
+        LNParams.cm.all.values.map(_.data.ourBalance.toLong).sum
+      ) ~~
       ("channels" ->
         LNParams.cm.all.values.map(channelAsJSON)
       ) ~~
