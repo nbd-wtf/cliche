@@ -1,6 +1,10 @@
 package cliche
 
+import java.nio.file.{Files, Path, Paths}
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import scala.util.{Try, Random}
+import scala.collection.mutable.ArrayBuffer
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
@@ -62,6 +66,8 @@ case class AcceptOverride(channelId: String) extends Command
 object Commands {
   implicit val formats: Formats = DefaultFormats
 
+  var commandLog: ArrayBuffer[String] = ArrayBuffer.empty[String]
+
   def printjson(x: JValue): Unit =
     println(
       Config.compactJSON match {
@@ -71,6 +77,11 @@ object Commands {
     )
 
   def handle(input: String): Unit = {
+    val now = (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z")).format(
+      Calendar.getInstance().getTime
+    )
+    var log = s"[$now]"
+
     val (id: String, command: Command) =
       try {
         val parsed: JValue = JsonMethods.parse(input)
@@ -81,6 +92,8 @@ object Commands {
           )
         val method = parsed \ "method"
         val params = parsed \ "params"
+
+        log = s"$log $method"
 
         (parsed \ "method").extract[String] match {
           case "get-info"        => (id, params.extract[GetInfo])
@@ -96,7 +109,11 @@ object Commands {
       } catch {
         case _: Throwable => {
           val spl = input.split(" ")
-          val res = spl(0) match {
+          val method = spl(0)
+
+          log = s"$log $method"
+
+          val res = method match {
             case "get-info"   => CaseApp.parse[GetInfo](spl.tail)
             case "request-hc" => CaseApp.parse[RequestHostedChannel](spl.tail)
             case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
@@ -128,7 +145,9 @@ object Commands {
     }
 
     response match {
-      case Left(err) =>
+      case Left(err) => {
+        log = s"$log, error: $err"
+
         printjson(
           // @formatter:off
           ("id" -> id) ~~
@@ -138,8 +157,21 @@ object Commands {
           )
           // @formatter:on
         )
-      case Right(result) => printjson(("id" -> id) ~~ ("result" -> result))
+      }
+      case Right(result) => {
+        log = s"$log, success"
+
+        printjson(("id" -> id) ~~ ("result" -> result))
+      }
     }
+
+    commandLog += log
+    commandLog = commandLog.takeRight(50)
+
+    Files.write(
+      Paths.get(s"${Config.datadir}/command.log"),
+      commandLog.mkString("\n").getBytes
+    )
   }
 
   def getInfo(): Either[String, JValue] = {
