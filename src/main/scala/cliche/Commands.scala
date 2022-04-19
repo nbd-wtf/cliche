@@ -47,6 +47,7 @@ import cliche.{Config, DB}
 sealed trait Command
 case class UnknownCommand() extends Command
 case class ShowError(err: caseapp.core.Error) extends Command
+case class Ping() extends Command
 case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
     extends Command
@@ -96,6 +97,7 @@ object Commands {
         log = s"$log $method"
 
         (parsed \ "method").extract[String] match {
+          case "ping"            => (id, params.extract[Ping])
           case "get-info"        => (id, params.extract[GetInfo])
           case "request-hc"      => (id, params.extract[RequestHostedChannel])
           case "create-invoice"  => (id, params.extract[CreateInvoice])
@@ -114,6 +116,7 @@ object Commands {
           log = s"$log $method"
 
           val res = method match {
+            case "ping"       => CaseApp.parse[Ping](spl.tail)
             case "get-info"   => CaseApp.parse[GetInfo](spl.tail)
             case "request-hc" => CaseApp.parse[RequestHostedChannel](spl.tail)
             case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
@@ -133,6 +136,7 @@ object Commands {
 
     val response = command match {
       case params: ShowError            => Left(params.err.message)
+      case _: Ping                      => ping()
       case _: GetInfo                   => getInfo()
       case params: RequestHostedChannel => requestHC(params)
       case params: CreateInvoice        => createInvoice(params)
@@ -174,8 +178,9 @@ object Commands {
     )
   }
 
-  def getInfo(): Either[String, JValue] = {
+  def ping(): Either[String, JValue] = Right(("ping" -> "pong"))
 
+  def getInfo(): Either[String, JValue] = {
     Right(
       // @formatter:off
       ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
