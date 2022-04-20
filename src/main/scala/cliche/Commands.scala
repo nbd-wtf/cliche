@@ -83,6 +83,11 @@ object Commands {
     )
     var log = s"[$now]"
 
+    def writeCommandLog(): Unit = Files.write(
+      Paths.get(s"${Config.datadir}/command.log"),
+      commandLog.mkString("\n").getBytes
+    )
+
     val (id: String, command: Command) =
       try {
         val parsed: JValue = JsonMethods.parse(input)
@@ -94,9 +99,9 @@ object Commands {
         val method = parsed \ "method"
         val params = parsed \ "params"
 
-        log = s"$log $method"
+        log = s"$log ${method.extract[String]}"
 
-        (parsed \ "method").extract[String] match {
+        method.extract[String] match {
           case "ping"            => (id, params.extract[Ping])
           case "get-info"        => (id, params.extract[GetInfo])
           case "request-hc"      => (id, params.extract[RequestHostedChannel])
@@ -133,6 +138,8 @@ object Commands {
           }
         }
       }
+
+    writeCommandLog()
 
     val response = command match {
       case params: ShowError            => Left(params.err.message)
@@ -172,10 +179,7 @@ object Commands {
     commandLog += log
     commandLog = commandLog.takeRight(50)
 
-    Files.write(
-      Paths.get(s"${Config.datadir}/command.log"),
-      commandLog.mkString("\n").getBytes
-    )
+    writeCommandLog()
   }
 
   def ping(): Either[String, JValue] = Right(("ping" -> "pong"))
