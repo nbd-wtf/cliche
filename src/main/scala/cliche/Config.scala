@@ -10,6 +10,8 @@ object Config {
     System.getProperty("user.home") + "/.config/cliche"
   )
 
+  (new File(datadir)).mkdirs()
+
   val c: TypesafeConfig = ConfigFactory
     .systemProperties()
     .withFallback(ConfigFactory.parseFile(new File(datadir, "cliche.conf")))
