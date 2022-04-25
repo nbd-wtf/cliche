@@ -81,12 +81,14 @@ object Commands {
     val now = (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z")).format(
       Calendar.getInstance().getTime
     )
-    var log = s"[$now]"
+    var log = s"[$now] $input"
 
     def writeCommandLog(): Unit = Files.write(
       Paths.get(s"${Config.datadir}/command.log"),
       commandLog.mkString("\n").getBytes
     )
+
+    writeCommandLog()
 
     val (id: String, command: Command) =
       try {
@@ -99,7 +101,7 @@ object Commands {
         val method = parsed \ "method"
         val params = parsed \ "params"
 
-        log = s"$log ${method.extract[String]}"
+        log = s"[$now] ${method.extract[String]}"
 
         method.extract[String] match {
           case "ping"            => (id, params.extract[Ping])
@@ -118,7 +120,7 @@ object Commands {
           val spl = input.split(" ")
           val method = spl(0)
 
-          log = s"$log $method"
+          log = s"[$now] $method"
 
           val res = method match {
             case "ping"       => CaseApp.parse[Ping](spl.tail)
