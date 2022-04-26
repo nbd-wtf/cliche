@@ -395,6 +395,8 @@ object Commands {
       case Some(prExt)
           if prExt.pr.amountOpt.isEmpty && params.msatoshi.isEmpty =>
         Left("missing amount")
+      case Some(prExt) if prExt.pr.paymentSecret == None =>
+        Left("missing payment secret")
       case Some(prExt) => {
         val amount =
           params.msatoshi
