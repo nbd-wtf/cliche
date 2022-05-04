@@ -1,6 +1,6 @@
 # Client for Lightning-compatible Lite Channels aka "Hosted"
 
-This is an amazing piece of software, still work-in-progress, based on [IMMORTAN](https://github.com/btcontract/immortan), that can do Lightning things, it is a "lite node", as we may call.
+This is an amazing piece of software, still work-in-progress, based on [IMMORTAN](https://github.com/fiatjaf/immortan), that can do Lightning things, it is a "lite node", as we may call.
 
 ## Running
 
