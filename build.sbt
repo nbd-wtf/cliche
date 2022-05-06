@@ -1,7 +1,7 @@
 name                  := "cliche"
 organization          := "fiatjaf"
 scalaVersion          := "2.13.8"
-version               := "0.1.0"
+version               := "0.3.0"
 libraryDependencies   ++= Seq(
   "com.fiatjaf" % "immortan_2.13" % "0.1.1",
   "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13",
