@@ -268,7 +268,11 @@ object Commands {
               // @formatter:off
               ("event" -> "hc_creation_succeeded") ~~
               ("channel_id" -> cs.channelId.toHex) ~~
-              ("remote_peer" -> cs.remoteInfo.nodeId.toString)
+              ("peer" ->
+                (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
+                 ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
+                 ("addr" -> cs.remoteInfo.address.toString())
+              )
               // @formatter:on
             )
 
