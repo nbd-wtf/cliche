@@ -91,8 +91,10 @@ object Main {
     LNParams.logBag = DB.logBag
 
     Config.network match {
-      case "testnet" => LNParams.chainHash = Block.TestnetGenesisBlock.hash
       case "mainnet" => LNParams.chainHash = Block.LivenetGenesisBlock.hash
+      case "testnet" => LNParams.chainHash = Block.TestnetGenesisBlock.hash
+      case "regtest" => LNParams.chainHash = Block.RegtestGenesisBlock.hash
+      case "signet"  => LNParams.chainHash = Block.SegnetGenesisBlock.hash
       case _ =>
         println(
           s"< impossible config.network option ${Config.network}"
