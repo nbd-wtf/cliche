@@ -142,3 +142,11 @@ This is intended to be started by a different program and methods to be called b
 ## Development
 
 For development you can just do `sbt run`, and to compile a fat jar that later can be run with just `java -jar` do `sbt assembly`.
+
+## Uses
+
+This is a list of projects using Cliché:
+
+  - [@lntxbot](https://github.com/fiatjaf/lntxbot), a Telegram bot that does Lightning tips and payments
+  - [LNbits Infinity](https://github.com/lnbits/infinity), a multipurpose extensible web Lightning Wallet provider
+  - [relampago](https://github.com/lnbits/relampago), a Golang library for talking to any kind of Lightning backend
