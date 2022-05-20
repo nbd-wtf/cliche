@@ -543,6 +543,7 @@ object Commands {
        if (Channel.isOperationalAndOpen(chan)) { "open" }
        else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
        else if (Channel.isWaiting(chan)) { "waiting" }
+       else if (Channel.isErrored(chan)) { "error" }
        else "unknown"
      )) ~~
      ("policy" ->
