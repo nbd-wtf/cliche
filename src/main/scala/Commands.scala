@@ -1,6 +1,6 @@
 import java.nio.file.{Files, Path, Paths}
 import java.text.SimpleDateFormat
-import java.util.Calendar
+import java.util.{Calendar, Date}
 import scala.util.{Try, Random}
 import scala.collection.mutable.ArrayBuffer
 import org.json4s._
@@ -63,8 +63,6 @@ case class AcceptOverride(channelId: String) extends Command
 object Commands {
   implicit val formats: Formats = DefaultFormats
 
-  var commandLog: ArrayBuffer[String] = ArrayBuffer.empty[String]
-
   def printjson(x: JValue): Unit =
     println(
       Config.compactJSON match {
@@ -73,17 +71,34 @@ object Commands {
       }
     )
 
+  val commandLog: scala.collection.mutable.Map[Long, String] =
+    scala.collection.mutable.Map.empty
+
+  def writeCommandLog(): Unit = Files.write(
+    Paths.get(s"${Config.datadir}/command.log"),
+    commandLog
+      .map[Tuple2[Long, String]](kv => kv)
+      .toList
+      .sortBy[Long]({ case (time, _) => time })
+      .map({
+        case (time, text) => {
+          val formattedDate =
+            (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z"))
+              .format(new Date(time))
+          s"[$formattedDate] ${text}"
+        }
+      })
+      .mkString("\n")
+      .getBytes()
+  )
+
   def handle(input: String): Unit = {
-    val now = (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z")).format(
-      Calendar.getInstance().getTime
-    )
-    var log = s"[$now] $input"
+    val now = Calendar.getInstance().getTime().getTime()
 
-    def writeCommandLog(): Unit = Files.write(
-      Paths.get(s"${Config.datadir}/command.log"),
-      commandLog.mkString("\n").getBytes
-    )
-
+    commandLog(now) = input
+    def updateLog(suffix: String): Unit = {
+      commandLog.updateWith(now)(pre => pre.map(log => s"$log $suffix"))
+    }
     writeCommandLog()
 
     val (id: String, command: Command) =
@@ -97,7 +112,7 @@ object Commands {
         val method = parsed \ "method"
         val params = parsed \ "params"
 
-        log = s"[$now] ${method.extract[String]}"
+        updateLog(method.extract[String])
 
         method.extract[String] match {
           case "ping"            => (id, params.extract[Ping])
@@ -116,7 +131,7 @@ object Commands {
           val spl = input.split(" ")
           val method = spl(0)
 
-          log = s"[$now] $method"
+          updateLog(method)
 
           val res = method match {
             case "ping"       => CaseApp.parse[Ping](spl.tail)
@@ -155,7 +170,7 @@ object Commands {
 
     response match {
       case Left(err) => {
-        log = s"$log, error: $err"
+        updateLog(s"error: $err")
 
         printjson(
           // @formatter:off
@@ -168,15 +183,15 @@ object Commands {
         )
       }
       case Right(result) => {
-        log = s"$log, success"
-
+        updateLog("success")
         printjson(("id" -> id) ~~ ("result" -> result))
       }
     }
 
-    commandLog += log
-    commandLog = commandLog.takeRight(50)
-
+    // filter out commands older than 10 minutes
+    commandLog.filterInPlace((time, _) =>
+      time > Calendar.getInstance().getTime().getTime() - 10 * 60 * 1000
+    )
     writeCommandLog()
   }
 
