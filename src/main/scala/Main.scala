@@ -68,7 +68,7 @@ import immortan.utils.{
 import immortan.crypto.Tools
 import immortan.crypto.Tools.{~, none, Any2Some}
 
-import utils.{ConnectionProvider => ClicheConnectionProvider}
+import utils.RequestsConnectionProvider
 
 object Main {
   def init(): Unit = {
@@ -86,7 +86,7 @@ object Main {
     var lastTotalResyncStamp: Long = 0L
     var lastNormalResyncStamp: Long = 0L
 
-    LNParams.connectionProvider = new ClicheConnectionProvider
+    LNParams.connectionProvider = new RequestsConnectionProvider
     CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
     LNParams.logBag = DB.logBag
 
@@ -241,7 +241,7 @@ object Main {
     // guaranteed to fire (and update chainWallets) first
     LNParams.chainWallets.catcher ! new WalletEventsListener {
       override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
-        LNParams.cm.initConnect
+        LNParams.cm.initConnect()
 
       override def onWalletReady(
           blockCountEvent: ElectrumWallet.WalletReady
@@ -359,7 +359,7 @@ object Main {
     LNParams.cm.all = Channel.load(listeners = Set(LNParams.cm), DB.chanBag)
 
     // this inital notification will create all in/routed/out FSMs
-    LNParams.cm.notifyResolvers
+    LNParams.cm.notifyResolvers()
 
     println("# start electrum, fee rate, fiat rate listeners")
     LNParams.connectionProvider doWhenReady {

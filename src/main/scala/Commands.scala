@@ -130,19 +130,20 @@ object Commands {
         case _: Throwable => {
           val spl = input.split(" ")
           val method = spl(0)
+          val tail = spl.tail.toIndexedSeq
 
           updateLog(method)
 
           val res = method match {
-            case "ping"       => CaseApp.parse[Ping](spl.tail)
-            case "get-info"   => CaseApp.parse[GetInfo](spl.tail)
-            case "request-hc" => CaseApp.parse[RequestHostedChannel](spl.tail)
-            case "create-invoice" => CaseApp.parse[CreateInvoice](spl.tail)
-            case "pay-invoice"    => CaseApp.parse[PayInvoice](spl.tail)
-            case "check-payment"  => CaseApp.parse[CheckPayment](spl.tail)
-            case "list-payments"  => CaseApp.parse[ListPayments](spl.tail)
-            case "remove-hc" => CaseApp.parse[RemoveHostedChannel](spl.tail)
-            case "accept-override" => CaseApp.parse[AcceptOverride](spl.tail)
+            case "ping"            => CaseApp.parse[Ping](tail)
+            case "get-info"        => CaseApp.parse[GetInfo](tail)
+            case "request-hc"      => CaseApp.parse[RequestHostedChannel](tail)
+            case "create-invoice"  => CaseApp.parse[CreateInvoice](tail)
+            case "pay-invoice"     => CaseApp.parse[PayInvoice](tail)
+            case "check-payment"   => CaseApp.parse[CheckPayment](tail)
+            case "list-payments"   => CaseApp.parse[ListPayments](tail)
+            case "remove-hc"       => CaseApp.parse[RemoveHostedChannel](tail)
+            case "accept-override" => CaseApp.parse[AcceptOverride](tail)
             case _                 => Right(UnknownCommand(), Seq.empty[String])
           }
           res match {
@@ -296,7 +297,7 @@ object Commands {
 
             // this removes all previous channel listeners
             freshChannel.listeners = Set(LNParams.cm)
-            LNParams.cm.initConnect
+            LNParams.cm.initConnect()
 
             // update view on hub activity and finalize local stuff
             ChannelMaster.next(ChannelMaster.statusUpdateStream)
@@ -370,7 +371,7 @@ object Commands {
           ),
           Some(
             Bolt11Invoice.InvoiceFeatures(
-              Bolt11Invoice.defaultFeatures.unscoped
+              Bolt11Invoice.defaultFeatures.unscoped()
             )
           )
         ).flatten

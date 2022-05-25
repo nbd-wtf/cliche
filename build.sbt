@@ -9,6 +9,7 @@ libraryDependencies   ++= Seq(
   "com.iheart" % "ficus_2.13" % "1.5.0",
   "org.xerial" % "sqlite-jdbc" % "3.27.2.1"
 )
+scalacOptions        ++= Seq("-deprecation", "-feature")
 assemblyMergeStrategy := {
   case x if x.endsWith("module-info.class") => MergeStrategy.discard
   case x => (assembly / assemblyMergeStrategy).value(x)
