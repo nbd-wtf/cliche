@@ -519,8 +519,13 @@ object Commands {
 
     maybeChanAndCommits match {
       case Some((chan: Channel, hc: HostedCommits)) => {
-        chan.process(CMD_HOSTED_STATE_OVERRIDE(hc.overrideProposal.get))
-        Right(("accepted" -> true))
+        hc.overrideProposal match {
+          case Some(proposal) =>
+            chan.process(CMD_HOSTED_STATE_OVERRIDE(proposal))
+            Right(("accepted" -> true))
+          case None =>
+            Left(s"no override proposal for hosted channel ${params.channelId}")
+        }
       }
       case _ =>
         Left(s"invalid or unknown hosted channel id ${params.channelId}")
