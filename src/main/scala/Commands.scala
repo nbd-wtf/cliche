@@ -10,11 +10,7 @@ import org.json4s.JsonAST.{JValue, JObject, JArray}
 import caseapp.core
 import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
-import fr.acinq.eclair.channel.{
-  Commitments,
-  NormalCommits,
-  CMD_HOSTED_STATE_OVERRIDE
-}
+import fr.acinq.eclair.channel.{Commitments, NormalCommits}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
@@ -509,24 +505,15 @@ object Commands {
   }
 
   def acceptOverride(params: AcceptOverride): Either[String, JValue] = {
-    val maybeChanAndCommits = for {
+    (for {
       bytes <- ByteVector.fromHex(params.channelId)
       channelId <- Try(ByteVector32(bytes)).toOption
       chan <- LNParams.cm.all.get(channelId)
-      chanAndCommits <- Channel.chanAndCommitsOpt(chan)
-      commits = chanAndCommits.commits
-    } yield (chan, commits)
-
-    maybeChanAndCommits match {
-      case Some((chan: Channel, hc: HostedCommits)) => {
-        hc.overrideProposal match {
-          case Some(proposal) =>
-            chan.process(CMD_HOSTED_STATE_OVERRIDE(proposal))
-            Right(("accepted" -> true))
-          case None =>
-            Left(s"no override proposal for hosted channel ${params.channelId}")
-        }
-      }
+    } yield chan) match {
+      case Some(chan: ChannelHosted) =>
+        chan
+          .acceptOverride()
+          .flatMap(_ => Right(("accepted" -> true)))
       case _ =>
         Left(s"invalid or unknown hosted channel id ${params.channelId}")
     }
