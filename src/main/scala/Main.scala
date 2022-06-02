@@ -103,7 +103,7 @@ object Main {
     }
 
     LNParams.routerConf =
-      Router.RouterConf(initRouteMaxLength = 10, LNParams.maxCltvExpiryDelta)
+      Router.RouterConf(initRouteMaxLength = 20, LNParams.maxCltvExpiryDelta)
     LNParams.ourInit = LNParams.createInit
     LNParams.syncParams = new SyncParams {
       override val minPHCCapacity = MilliSatoshi(10000000L)
