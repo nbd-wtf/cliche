@@ -244,17 +244,21 @@ object Commands {
     val localParams =
       LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
-    ByteVector.fromHex(params.pubkey) match {
-      case None => Left("invalid pubkey hex")
-      case Some(pubkey) if pubkey.length != 33 =>
-        Left("pubkey must be 33 bytes hex")
-      case Some(pubkey) => {
-        val target: RemoteNodeInfo = RemoteNodeInfo(
-          PublicKey(pubkey),
+    (
+      ByteVector.fromHex(params.pubkey),
+      Try(
+        RemoteNodeInfo(
+          PublicKey(ByteVector.fromValidHex(params.pubkey)),
           NodeAddress.fromParts(host = params.host, port = params.port),
           "unnamed"
         )
-
+      ).toEither
+    ) match {
+      case (Some(pubkey), _) if pubkey.length != 33 =>
+        Left("pubkey must be 33 bytes hex")
+      case (None, _)    => Left("invalid pubkey hex")
+      case (_, Left(_)) => Left("invalid node address or port")
+      case (Some(pubkey), Right(target)) => {
         new HCOpenHandler(
           target,
           randomBytes32,
