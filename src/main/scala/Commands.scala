@@ -610,6 +610,7 @@ object Commands {
       ("event" -> "payment_failed") ~~
       ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
       ("parts" -> data.parts.size) ~~
+      ("routes" -> data. inFlightParts.map(_.route.asString)) ~~
       ("failure" -> data.failures.map(_.asString))
       // @formatter:on
     )
@@ -628,6 +629,7 @@ object Commands {
       ("fee_msatoshi" -> data.usedFee.toLong) ~~
       ("msatoshi" -> msatoshi) ~~
       ("preimage" -> fulfill.theirPreimage.toHex) ~~
+      ("routes" -> data.inFlightParts.map(_.route.asString)) ~~
       ("parts" -> data.parts.size)
       // @formatter:on
     )
