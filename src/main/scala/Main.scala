@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.io.{Source}
 import scala.annotation.nowarn
 import scodec.bits.{HexStringSyntax}
-import akka.actor
 import com.softwaremill.quicklens._
 import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
 import fr.acinq.eclair.{MilliSatoshi}
@@ -67,6 +66,7 @@ import immortan.utils.{
 }
 import immortan.crypto.Tools
 import immortan.crypto.Tools.{~, none, Any2Some}
+import castor.Context.Simple.global
 
 import utils.RequestsConnectionProvider
 
@@ -145,33 +145,17 @@ object Main {
     LNParams.cm = new ChannelMaster(DB.payBag, DB.chanBag, DB.extDataBag, pf)
 
     println("# instantiating electrum actors")
-    val electrumPool = LNParams.loggedActor(
-      actor.Props(
-        classOf[ElectrumClientPool],
-        LNParams.blockCount,
-        LNParams.chainHash,
-        LNParams.ec
-      ),
-      "connection-pool"
+    val pool = new ElectrumClientPool(
+      LNParams.blockCount,
+      LNParams.chainHash
     )
-    val sync = LNParams.loggedActor(
-      actor.Props(
-        classOf[ElectrumChainSync],
-        electrumPool,
-        DB.extDataBag,
-        LNParams.chainHash
-      ),
-      "chain-sync"
+    val sync = new ElectrumChainSync(
+      pool,
+      DB.extDataBag,
+      LNParams.chainHash
     )
-    val watcher = LNParams.loggedActor(
-      actor.Props(classOf[ElectrumWatcher], LNParams.blockCount, electrumPool),
-      "channel-watcher"
-    )
-    val catcher =
-      LNParams.loggedActor(
-        actor.Props(new WalletEventsCatcher),
-        "events-catcher"
-      )
+    val watcher = new ElectrumWatcher(LNParams.blockCount, pool)
+    val catcher = new WalletEventsCatcher()
 
     println("# loading onchain wallets")
     val params =
@@ -184,45 +168,50 @@ object Main {
 
     @nowarn
     val walletExt: WalletExt =
-      (WalletExt(
-        wallets = Nil,
-        catcher,
-        sync,
-        electrumPool,
-        watcher,
-        params
-      ) /: DB.chainWalletBag.listWallets) {
-        case ext ~ CompleteChainWalletInfo(
-              core: SigningWallet,
-              persistentSigningWalletData,
-              lastBalance,
-              label,
-              false
-            ) =>
-          val signingWallet =
-            ext.makeSigningWalletParts(core, lastBalance, label)
-          signingWallet.walletRef ! persistentSigningWalletData
-          ext.copy(wallets = signingWallet :: ext.wallets)
+      DB.chainWalletBag.listWallets
+        .foldLeft(
+          WalletExt(
+            wallets = Nil,
+            catcher,
+            sync,
+            pool,
+            watcher,
+            params
+          )
+        ) {
+          case ext ~ CompleteChainWalletInfo(
+                core: SigningWallet,
+                persistentSigningWalletData,
+                lastBalance,
+                label,
+                false
+              ) =>
+            val signingWallet =
+              ext.makeSigningWalletParts(core, lastBalance, label)
+            signingWallet.wallet.send(persistentSigningWalletData)
+            ext.copy(wallets = signingWallet :: ext.wallets)
 
-        case ext ~ CompleteChainWalletInfo(
-              core: WatchingWallet,
-              persistentWatchingWalletData,
-              lastBalance,
-              label,
-              false
-            ) =>
-          val watchingWallet =
-            ext.makeWatchingWallet84Parts(core, lastBalance, label)
-          watchingWallet.walletRef ! persistentWatchingWalletData
-          ext.copy(wallets = watchingWallet :: ext.wallets)
-      }
+          case ext ~ CompleteChainWalletInfo(
+                core: WatchingWallet,
+                persistentWatchingWalletData,
+                lastBalance,
+                label,
+                false
+              ) =>
+            val watchingWallet =
+              ext.makeWatchingWallet84Parts(core, lastBalance, label)
+            watchingWallet.wallet.send(persistentWatchingWalletData)
+            ext.copy(wallets = watchingWallet :: ext.wallets)
+        }
 
     LNParams.chainWallets = if (walletExt.wallets.isEmpty) {
-      val core =
-        SigningWallet(walletType = EclairWallet.BIP84, isRemovable = false)
-      val wallet =
-        walletExt.makeSigningWalletParts(core, Satoshi(0L), "Bitcoin")
-      walletExt.withFreshWallet(wallet)
+      walletExt.withFreshWallet(
+        walletExt.makeSigningWalletParts(
+          SigningWallet(walletType = EclairWallet.BIP84, isRemovable = false),
+          Satoshi(0L),
+          "Bitcoin"
+        )
+      )
     } else walletExt
 
     LNParams.feeRates.listeners += new FeeRatesListener {
@@ -239,7 +228,7 @@ object Main {
     }
 
     // guaranteed to fire (and update chainWallets) first
-    LNParams.chainWallets.catcher ! new WalletEventsListener {
+    LNParams.chainWallets.catcher.add(new WalletEventsListener {
       override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
         LNParams.cm.initConnect()
 
@@ -264,7 +253,7 @@ object Main {
       override def onChainMasterSelected(addr: InetSocketAddress): Unit =
         currentChainNode = addr.asSome
 
-      override def onChainDisconnected: Unit = currentChainNode = None
+      override def onChainDisconnected(): Unit = currentChainNode = None
 
       override def onTransactionReceived(
           txEvent: ElectrumWallet.TransactionReceived
@@ -351,7 +340,7 @@ object Main {
             isIncoming = 1L
           )
       }
-    }
+    })
 
     pf.listeners += LNParams.cm.opm
 
@@ -363,7 +352,8 @@ object Main {
 
     println("# start electrum, fee rate, fiat rate listeners")
     LNParams.connectionProvider doWhenReady {
-      electrumPool ! ElectrumClientPool.InitConnect
+      pool.initConnect()
+
       // only schedule periodic resync if Lightning channels are being present
       if (LNParams.cm.all.nonEmpty) pf process PathFinder.CMDStartPeriodicResync
 
