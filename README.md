@@ -146,6 +146,15 @@ For development you can just do `sbt run`, and to compile a fat jar that later c
 
 If your `build.sbt` happen to have an Immortan version ending with `-SNAPSHOT` that means you either have to build Immortan and publish it locally using that version (`sbt publishLocal` on Immortan repository) or you can change to a non-snapshot version. Pick one from [here](https://repo1.maven.org/maven2/com/fiatjaf/immortan_2.13/).
 
+### Building the native image
+
+1. Download GraalVM 22.0.0.3, here I used java11-linux version from [release 22.0.0.3](https://github.com/gluonhq/graal/releases/tag/gluon-22.0.0.3-Final);
+2. Edit `build.sbt`'s `nativeImageGraalHome` to point to your GraalVM path;
+3. Uncomment the lines between two `-------------------` at the end of `Main.scala`;
+4. Run `sbt nativeImageRunAgent`;
+5. Comment the lines again;
+6. Run `sbt nativeImage`.
+
 ## Uses
 
 This is a list of projects using Cliché:

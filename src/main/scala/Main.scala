@@ -417,6 +417,14 @@ object Main {
     println("# waiting for commands")
     Commands.onReady()
 
+    // uncomment these lines when running the nativeImageRunAgent
+    // -------------------
+    // Thread.sleep(5000)
+    // Commands.handle("get-info")
+    // Thread.sleep(10000)
+    // scala.sys.exit()
+    // -------------------
+
     while (true) {
       val line = scala.io.StdIn.readLine().trim
       if (line.size > 0) {

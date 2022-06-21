@@ -18,7 +18,10 @@ assemblyMergeStrategy := {
 }
 
 mainClass := Some("Main")
-nativeImageOptions += "-H:IncludeResources=.*.conf|.*.xml|.*/org/sqlite/.*|org/sqlite/.*"
+
+import java.nio.file.Paths
+nativeImageInstalled := true
+nativeImageGraalHome := Paths.get("/usr/lib/jvm/graalvm-svm-java11-linux-gluon-22.0.0.3-Final/")
 nativeImageOptions += "--initialize-at-build-time=org.sqlite.JDBC"
 nativeImageOptions += "--initialize-at-build-time=org.sqlite.core.DB$ProgressObserver"
 nativeImageOptions += "--initialize-at-build-time=org.sqlite.core.DB"
@@ -29,7 +32,10 @@ nativeImageOptions += "--initialize-at-build-time=org.sqlite.Function$Aggregate"
 nativeImageOptions += "--initialize-at-build-time=org.sqlite.Function$Window"
 nativeImageOptions += "--initialize-at-build-time=java.sql.DriverManager"
 nativeImageOptions += "-H:+ReportUnsupportedElementsAtRuntime"
-nativeImageOptions += "-H:+TraceClassInitialization"
 nativeImageOptions += "--initialize-at-build-time=scala.Symbol$"
 nativeImageOptions += "--allow-incomplete-classpath"
+nativeImageOptions += s"-H:ReflectionConfigurationFiles=${target.value / "native-image-configs" / "reflect-config.json"}"
+nativeImageOptions += s"-H:JNIConfigurationFiles=${target.value / "native-image-configs" / "jni-config.json" }"
+nativeImageOptions += s"-H:ConfigurationFileDirectories=${target.value / "native-image-configs" }"
+nativeImageOptions +="-H:+JNI"
 nativeImageOptions += "--no-fallback"
