@@ -128,6 +128,7 @@ This is intended to be started by a different program and methods to be called b
 - `pay-invoice`, params: `invoice` (string), `msatoshi` (number, optional)
 - `check-payment` (works for both incoming and outgoing payments), params: `hash` (string)
 - `list-payments`, params: `count` (optional, int)
+- `accept-override`, params: `channel-id` (string)
 
 ### Events
 
@@ -139,9 +140,11 @@ This is intended to be started by a different program and methods to be called b
 - `hc_creation_succeeded`
 - `hc_creation_failed`
 
-## Development
+## Building and development
 
 For development you can just do `sbt run`, and to compile a fat jar that later can be run with just `java -jar` do `sbt assembly`.
+
+If your `build.sbt` happen to have an Immortan version ending with `-SNAPSHOT` that means you either have to build Immortan and publish it locally using that version (`sbt publishLocal` on Immortan repository) or you can change to a non-snapshot version. Pick one from [here](https://repo1.maven.org/maven2/com/fiatjaf/immortan_2.13/).
 
 ## Uses
 
