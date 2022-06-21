@@ -128,6 +128,7 @@ This is intended to be started by a different program and methods to be called b
 - `pay-invoice`, params: `invoice` (string), `msatoshi` (number, optional)
 - `check-payment` (works for both incoming and outgoing payments), params: `hash` (string)
 - `list-payments`, params: `count` (optional, int)
+- `accept-override`, params: `channel-id`
 
 ### Events
 
