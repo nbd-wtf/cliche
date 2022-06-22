@@ -417,13 +417,23 @@ object Main {
     println("# waiting for commands")
     Commands.onReady()
 
-    // uncomment these lines when running the nativeImageRunAgent
-    // -------------------
-    // Thread.sleep(5000)
-    // Commands.handle("get-info")
-    // Thread.sleep(10000)
-    // scala.sys.exit()
-    // -------------------
+    // ------------------- ignore this part between the lines
+    if (Config.nativeImageAgent) {
+      Thread.sleep(5000)
+      fr.acinq.eclair.randomBytes(16)
+      Commands.handle(
+        "request-hc --host 107.189.30.195 --port 9734 --pubkey 03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
+      )
+      Commands.handle("get-info")
+      Thread.sleep(5000)
+      Commands.handle("create-invoice --msatoshi 987654")
+      Commands.handle(
+        "pay-invoice --invoice lnbc200n1p3txsgcpp5he23745cajnqu3lmglwsyzvtxqan3xlt9kusuq2qju6l8y2xsersdp2ve5kzar2v9nr5gpqdeshg6tkv5kkjmtpvajjqun4dcsp5f6xkd25epetwehzv7xzzaj59sc04q5dn2knu2ac05pmxz46u3sxqxqy9gcqcqzys9qrsgqrzjqd98kxkpyw0l9tyy8r8q57k7zpy9zjmh6sez752wj6gcumqnj3yxzhdsmg6qq56utgqqqqqqqqqqqeqqjqrzjqtx3k77yrrav9hye7zar2rtqlfkytl094dsp0ms5majzth6gt7ca6uhdkxl983uywgqqqqqqqqqq86qqjqrzjq0h9s36s2kpql0a99c6k4zfq7chcx9sjnsund8damcl96qvc4833tx69gvk26e6efsqqqqlgqqqqpjqqjq8dracgxedjhrtj2xuuvgzgssqfkz4v4xw0yhfans08w4n00swyrrpg87dvcuenzcaym0jmfv2v6ztuw4sec9flu9v8p76t23r2pjtjcp89j9zf"
+      )
+      Thread.sleep(5000)
+      scala.sys.exit()
+    }
+    // ------------------- nothing to see here
 
     while (true) {
       val line = scala.io.StdIn.readLine().trim

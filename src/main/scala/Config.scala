@@ -17,6 +17,8 @@ object Config {
     .withFallback(ConfigFactory.parseFile(new File(datadir, "cliche.conf")))
     .withFallback(ConfigFactory.load())
 
+  val nativeImageAgent = c.as[Boolean]("nativeImageAgent")
+
   val network = c.as[String]("cliche.network")
   val seed =
     try {
@@ -31,7 +33,10 @@ object Config {
           .toMnemonics(fr.acinq.eclair.randomBytes(16))
           .mkString(" ")
         println(
-          s"# if you don't have a mnemonic, here's one your computer has just generated: '${twelveWords}'"
+          s"# if you don't have a mnemonic, here's one your computer has just generated: '${twelveWords}'."
+        )
+        println(
+          s"# To run recklessly without writing your seed anywhere, start again with `-Dcliche.seed=${twelveWords}`."
         )
         scala.sys.exit(1)
       }

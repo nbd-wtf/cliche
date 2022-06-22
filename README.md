@@ -10,6 +10,12 @@ To use a different directory do `java -Dcliche.datadir=/my/other/directory -jar 
 
 In that directory you can have a file called `cliche.conf` that can have the same options that we have specified on [reference.conf](https://github.com/fiatjaf/cliche/blob/master/src/main/resources/reference.conf). The settings will default to the ones on `reference.conf`. You can also specify the settings as flags like the `cliche.datadir` above and these will take precedence even over `cliche.conf`.
 
+### Running the native image (no JVM required)
+
+Download the native image from the [releases page](https://github.com/fiatjaf/cliche/releases) and run it with `./cliche`. All the rest is the same as above except it doesn't require a Java Virtual Machine at all (also starts much faster and who knows, maybe it's faster and leaner too but that remains to be proven).
+
+To pass options just do `./cliche -Dcliche.datadir=etc`.
+
 ## Usage
 
 This is an example session with some commands called and asynchronous events being received:
@@ -146,14 +152,13 @@ For development you can just do `sbt run`, and to compile a fat jar that later c
 
 If your `build.sbt` happen to have an Immortan version ending with `-SNAPSHOT` that means you either have to build Immortan and publish it locally using that version (`sbt publishLocal` on Immortan repository) or you can change to a non-snapshot version. Pick one from [here](https://repo1.maven.org/maven2/com/fiatjaf/immortan_2.13/).
 
-### Building the native image
+### Building the GraalVM Native Image
 
 1. Download GraalVM 22.0.0.3, here I used java11-linux version from [release 22.0.0.3](https://github.com/gluonhq/graal/releases/tag/gluon-22.0.0.3-Final);
-2. Edit `build.sbt`'s `nativeImageGraalHome` to point to your GraalVM path;
-3. Uncomment the lines between two `-------------------` at the end of `Main.scala`;
-4. Run `sbt nativeImageRunAgent`;
-5. Comment the lines again;
-6. Run `sbt nativeImage`.
+2. Set the environment variable `GRAALVM_HOME` to the directory where you unzipped that;
+3. Run `sbt nativeImage`.
+
+(If something big changes then it might be necessary to run the native image agent again. In that case it might be wise to edit the `Main.scala` block guarded by the `if (Config.nativeImageAgent)` condition to make sure the most important codepaths are touched during the agent run, then run `sbt nativeImageRunAgent` and then `sbt nativeImage`.)
 
 ## Uses
 
