@@ -1,7 +1,7 @@
 import java.nio.file.{Files, Path, Paths}
 import java.text.SimpleDateFormat
 import java.util.{Calendar, Date}
-import scala.util.{Try, Random}
+import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
 import org.json4s._
 import org.json4s.native.JsonMethods
@@ -353,56 +353,62 @@ object Commands {
     val secret = randomBytes32
     val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
 
-    // build invoice
-    val pr = new Bolt11Invoice(
-      Bolt11Invoice.prefixes(LNParams.chainHash),
-      msatoshi,
-      System.currentTimeMillis / 1000L,
-      privateKey.publicKey, {
-        val defaultTags = List(
-          Some(Bolt11Invoice.PaymentHash(sha256(preimage))),
-          Some(descriptionTag),
-          Some(Bolt11Invoice.PaymentSecret(secret)),
-          Some(Bolt11Invoice.Expiry(3600 * 24 * 2 /* 2 days */ )),
-          Some(
-            Bolt11Invoice.MinFinalCltvExpiry(
-              LNParams.incomingFinalCltvExpiry.underlying
+    Try {
+      // build invoice
+      val pr = new Bolt11Invoice(
+        Bolt11Invoice.prefixes(LNParams.chainHash),
+        msatoshi,
+        System.currentTimeMillis / 1000L,
+        privateKey.publicKey, {
+          val defaultTags = List(
+            Some(Bolt11Invoice.PaymentHash(sha256(preimage))),
+            Some(descriptionTag),
+            Some(Bolt11Invoice.PaymentSecret(secret)),
+            Some(Bolt11Invoice.Expiry(3600 * 24 * 2 /* 2 days */ )),
+            Some(
+              Bolt11Invoice.MinFinalCltvExpiry(
+                LNParams.incomingFinalCltvExpiry.underlying
+              )
+            ),
+            Some(
+              Bolt11Invoice.InvoiceFeatures(
+                Bolt11Invoice.defaultFeatures.unscoped()
+              )
             )
-          ),
-          Some(
-            Bolt11Invoice.InvoiceFeatures(
-              Bolt11Invoice.defaultFeatures.unscoped()
-            )
-          )
-        ).flatten
-        defaultTags ++ hops.map(Bolt11Invoice.RoutingInfo)
-      },
-      ByteVector.empty
-    ).sign(privateKey)
+          ).flatten
+          defaultTags ++ hops.map(Bolt11Invoice.RoutingInfo)
+        },
+        ByteVector.empty
+      ).sign(privateKey)
 
-    // store invoice on database
-    val prExt = PaymentRequestExt.from(pr)
-    LNParams.cm.payBag.replaceIncomingPayment(
-      prex = prExt,
-      preimage = preimage,
-      description = PaymentDescription(
-        split = None,
-        label = params.label,
-        semanticOrder = None,
-        invoiceText = params.description.getOrElse("")
-      ),
-      balanceSnap = MilliSatoshi(0L),
-      fiatRateSnap = Map.empty
-    )
+      // store invoice on database
+      val prExt = PaymentRequestExt.from(pr)
+      LNParams.cm.payBag.replaceIncomingPayment(
+        prex = prExt,
+        preimage = preimage,
+        description = PaymentDescription(
+          split = None,
+          label = params.label,
+          semanticOrder = None,
+          invoiceText = params.description.getOrElse("")
+        ),
+        balanceSnap = MilliSatoshi(0L),
+        fiatRateSnap = Map.empty
+      )
 
-    Right(
-      // @formatter:off
-      ("invoice" -> prExt.raw) ~~
-      ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
-      ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
-      ("hints_count" -> prExt.pr.routingInfo.size)
-      // @formatter:on
-    )
+      prExt
+    } match {
+      case Success(prExt) =>
+        Right(
+          // @formatter:off
+          ("invoice" -> prExt.raw) ~~
+          ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
+          ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
+          ("hints_count" -> prExt.pr.routingInfo.size)
+          // @formatter:on
+        )
+      case Failure(_) => Left("failed to create the invoice")
+    }
   }
 
   def payInvoice(params: PayInvoice): Either[String, JValue] = {
