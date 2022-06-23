@@ -1,15 +1,9 @@
-import java.io.{File}
 import java.net.InetSocketAddress
-import java.util.concurrent.atomic.AtomicLong
-import scala.io.{Source}
 import scala.annotation.nowarn
-import scodec.bits.{HexStringSyntax}
 import com.softwaremill.quicklens._
 import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
 import fr.acinq.eclair.{MilliSatoshi}
 import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.eclair.wire.NodeAddress
 import fr.acinq.eclair.blockchain.electrum.db.{
   CompleteChainWalletInfo,
   SigningWallet,
@@ -17,21 +11,14 @@ import fr.acinq.eclair.blockchain.electrum.db.{
 }
 import fr.acinq.eclair.router.Router
 import fr.acinq.eclair.transactions.RemoteFulfill
-import fr.acinq.eclair.wire.{Init}
 import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
 import fr.acinq.eclair.blockchain.electrum.{
   ElectrumWallet,
   ElectrumEclairWallet,
-  CheckPoint,
   ElectrumChainSync,
   ElectrumClientPool,
   ElectrumWatcher,
   WalletParameters
-}
-import fr.acinq.eclair.blockchain.electrum.db.{
-  CompleteChainWalletInfo,
-  SigningWallet,
-  WatchingWallet
 }
 import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE}
 import immortan.{
@@ -64,7 +51,6 @@ import immortan.utils.{
   WalletEventsCatcher,
   WalletEventsListener
 }
-import immortan.crypto.Tools
 import immortan.crypto.Tools.{~, none, Any2Some}
 import castor.Context.Simple.global
 
