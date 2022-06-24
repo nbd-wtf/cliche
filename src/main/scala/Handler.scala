@@ -10,35 +10,8 @@ import caseapp.CaseApp
 import Commands._
 
 object Handler {
-  val commandLog: scala.collection.mutable.Map[Long, String] =
-    scala.collection.mutable.Map.empty
-
-  def writeCommandLog(): Unit = Files.write(
-    Paths.get(s"${Config.datadir}/command.log"),
-    commandLog
-      .map[Tuple2[Long, String]](kv => kv)
-      .toList
-      .sortBy[Long]({ case (time, _) => time })
-      .map({
-        case (time, text) => {
-          val formattedDate =
-            (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z"))
-              .format(new Date(time))
-          s"[$formattedDate] ${text}"
-        }
-      })
-      .mkString("\n")
-      .getBytes()
-  )
-
   def handle(input: String): String = {
     val now = Calendar.getInstance().getTime().getTime()
-
-    commandLog(now) = input
-    def updateLog(suffix: String): Unit = {
-      commandLog.updateWith(now)(pre => pre.map(log => s"$log $suffix"))
-    }
-    writeCommandLog()
 
     val (id: String, command: Command) =
       try {
@@ -50,8 +23,6 @@ object Handler {
           )
         val method = parsed \ "method"
         val params = parsed \ "params"
-
-        updateLog(method.extract[String])
 
         method.extract[String] match {
           case "ping"            => (id, params.extract[Ping])
@@ -70,8 +41,6 @@ object Handler {
           val spl = input.trim().split(" ")
           val method = spl(0)
           val tail = spl.tail.toIndexedSeq
-
-          updateLog(method)
 
           val res = method match {
             case "ping"            => CaseApp.parse[Ping](tail)
@@ -92,8 +61,6 @@ object Handler {
         }
       }
 
-    writeCommandLog()
-
     val response = command match {
       case params: ShowError            => Left(params.err.message)
       case _: Ping                      => ping()
@@ -108,10 +75,8 @@ object Handler {
       case params: UnknownCommand       => Left(s"unhandled ${params.method}")
     }
 
-    val res = response match {
+    response match {
       case Left(err) => {
-        updateLog(s"error: $err")
-
         renderjson(
           // @formatter:off
           ("id" -> id) ~~
@@ -123,17 +88,8 @@ object Handler {
         )
       }
       case Right(result) => {
-        updateLog("success")
         renderjson(("id" -> id) ~~ ("result" -> result))
       }
     }
-
-    // filter out commands older than 10 minutes
-    commandLog.filterInPlace((time, _) =>
-      time > Calendar.getInstance().getTime().getTime() - 10 * 60 * 1000
-    )
-    writeCommandLog()
-
-    res
   }
 }
