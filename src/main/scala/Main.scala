@@ -1,7 +1,11 @@
 import java.net.InetSocketAddress
 import scala.annotation.nowarn
+import scala.concurrent.Future
+import cats.syntax.all._
+import cats.effect.{IO, IOApp, ExitCode}
 import com.softwaremill.quicklens._
 import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
+import castor.Context.Simple.global
 import fr.acinq.eclair.{MilliSatoshi}
 import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
 import fr.acinq.eclair.blockchain.electrum.db.{
@@ -52,11 +56,10 @@ import immortan.utils.{
   WalletEventsListener
 }
 import immortan.crypto.Tools.{~, none, Any2Some}
-import castor.Context.Simple.global
 
 import utils.RequestsConnectionProvider
 
-object Main {
+object Main extends IOApp.Simple {
   def init(): Unit = {
     // prevent netty/electrumclient to flood us with logs
     InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
@@ -397,7 +400,7 @@ object Main {
       .subscribe(r => Commands.onPaymentReceived(r))
   }
 
-  def main(args: Array[String]): Unit = {
+  override final val run: IO[Unit] = {
     init()
 
     println("# waiting for commands")
@@ -407,13 +410,13 @@ object Main {
     if (Config.nativeImageAgent) {
       Thread.sleep(5000)
       fr.acinq.eclair.randomBytes(16)
-      Commands.handle(
+      Handler.handle(
         "request-hc --host 107.189.30.195 --port 9734 --pubkey 03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
       )
-      Commands.handle("get-info")
+      Handler.handle("get-info")
       Thread.sleep(5000)
-      Commands.handle("create-invoice --msatoshi 987654")
-      Commands.handle(
+      Handler.handle("create-invoice --msatoshi 987654")
+      Handler.handle(
         "pay-invoice --invoice lnbc200n1p3txsgcpp5he23745cajnqu3lmglwsyzvtxqan3xlt9kusuq2qju6l8y2xsersdp2ve5kzar2v9nr5gpqdeshg6tkv5kkjmtpvajjqun4dcsp5f6xkd25epetwehzv7xzzaj59sc04q5dn2knu2ac05pmxz46u3sxqxqy9gcqcqzys9qrsgqrzjqd98kxkpyw0l9tyy8r8q57k7zpy9zjmh6sez752wj6gcumqnj3yxzhdsmg6qq56utgqqqqqqqqqqqeqqjqrzjqtx3k77yrrav9hye7zar2rtqlfkytl094dsp0ms5majzth6gt7ca6uhdkxl983uywgqqqqqqqqqq86qqjqrzjq0h9s36s2kpql0a99c6k4zfq7chcx9sjnsund8damcl96qvc4833tx69gvk26e6efsqqqqlgqqqqpjqqjq8dracgxedjhrtj2xuuvgzgssqfkz4v4xw0yhfans08w4n00swyrrpg87dvcuenzcaym0jmfv2v6ztuw4sec9flu9v8p76t23r2pjtjcp89j9zf"
       )
       Thread.sleep(5000)
@@ -421,11 +424,9 @@ object Main {
     }
     // ------------------- nothing to see here
 
-    while (true) {
-      val line = scala.io.StdIn.readLine().trim
-      if (line.size > 0) {
-        Commands.handle(line)
-      }
-    }
+    (
+      new ServerApp[IO].stream.compile.drain,
+      new StdinApp[IO].run()
+    ).parTupled.void
   }
 }

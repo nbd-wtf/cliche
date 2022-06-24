@@ -9,6 +9,8 @@ libraryDependencies   ++= Seq(
   "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13",
   "com.lihaoyi" % "requests_2.13" % "0.7.0",
   "com.iheart" % "ficus_2.13" % "1.5.0",
+  "org.http4s" % "http4s-blaze-server_2.13" % "1.0.0-M33",
+  "org.http4s" % "http4s-dsl_2.13" % "1.0.0-M33",
   "org.xerial" % "sqlite-jdbc" % "3.27.2.1"
 )
 scalacOptions        ++= Seq("-deprecation", "-feature")

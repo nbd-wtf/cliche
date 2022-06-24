@@ -1,14 +1,9 @@
-import java.nio.file.{Files, Path, Paths}
-import java.text.SimpleDateFormat
-import java.util.{Calendar, Date}
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
 import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
 import org.json4s.JsonAST.{JValue, JObject, JArray}
-import caseapp.core
-import caseapp.CaseApp
 import com.softwaremill.quicklens.ModifyPimp
 import fr.acinq.eclair.channel.{Commitments, NormalCommits}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
@@ -37,7 +32,7 @@ import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
 
 sealed trait Command
-case class UnknownCommand() extends Command
+case class UnknownCommand(method: String) extends Command
 case class ShowError(err: caseapp.core.Error) extends Command
 case class Ping() extends Command
 case class GetInfo() extends Command
@@ -59,137 +54,9 @@ case class AcceptOverride(channelId: String) extends Command
 object Commands {
   implicit val formats: Formats = DefaultFormats
 
-  def printjson(x: JValue): Unit =
-    println(
-      Config.compactJSON match {
-        case true  => JsonMethods.compact(JsonMethods.render(x))
-        case false => JsonMethods.pretty(JsonMethods.render(x))
-      }
-    )
-
-  val commandLog: scala.collection.mutable.Map[Long, String] =
-    scala.collection.mutable.Map.empty
-
-  def writeCommandLog(): Unit = Files.write(
-    Paths.get(s"${Config.datadir}/command.log"),
-    commandLog
-      .map[Tuple2[Long, String]](kv => kv)
-      .toList
-      .sortBy[Long]({ case (time, _) => time })
-      .map({
-        case (time, text) => {
-          val formattedDate =
-            (new SimpleDateFormat("d MMM yyyy HH:mm:ss Z"))
-              .format(new Date(time))
-          s"[$formattedDate] ${text}"
-        }
-      })
-      .mkString("\n")
-      .getBytes()
-  )
-
-  def handle(input: String): Unit = {
-    val now = Calendar.getInstance().getTime().getTime()
-
-    commandLog(now) = input
-    def updateLog(suffix: String): Unit = {
-      commandLog.updateWith(now)(pre => pre.map(log => s"$log $suffix"))
-    }
-    writeCommandLog()
-
-    val (id: String, command: Command) =
-      try {
-        val parsed: JValue = JsonMethods.parse(input)
-        val id =
-          (
-            try { (parsed \ "id").extract[String] }
-            catch { case _: Throwable => "" }
-          )
-        val method = parsed \ "method"
-        val params = parsed \ "params"
-
-        updateLog(method.extract[String])
-
-        method.extract[String] match {
-          case "ping"            => (id, params.extract[Ping])
-          case "get-info"        => (id, params.extract[GetInfo])
-          case "request-hc"      => (id, params.extract[RequestHostedChannel])
-          case "create-invoice"  => (id, params.extract[CreateInvoice])
-          case "pay-invoice"     => (id, params.extract[PayInvoice])
-          case "check-payment"   => (id, params.extract[CheckPayment])
-          case "list-payments"   => (id, params.extract[ListPayments])
-          case "remove-hc"       => (id, params.extract[RemoveHostedChannel])
-          case "accept-override" => (id, params.extract[AcceptOverride])
-          case _                 => (id, UnknownCommand())
-        }
-      } catch {
-        case _: Throwable => {
-          val spl = input.split(" ")
-          val method = spl(0)
-          val tail = spl.tail.toIndexedSeq
-
-          updateLog(method)
-
-          val res = method match {
-            case "ping"            => CaseApp.parse[Ping](tail)
-            case "get-info"        => CaseApp.parse[GetInfo](tail)
-            case "request-hc"      => CaseApp.parse[RequestHostedChannel](tail)
-            case "create-invoice"  => CaseApp.parse[CreateInvoice](tail)
-            case "pay-invoice"     => CaseApp.parse[PayInvoice](tail)
-            case "check-payment"   => CaseApp.parse[CheckPayment](tail)
-            case "list-payments"   => CaseApp.parse[ListPayments](tail)
-            case "remove-hc"       => CaseApp.parse[RemoveHostedChannel](tail)
-            case "accept-override" => CaseApp.parse[AcceptOverride](tail)
-            case _                 => Right(UnknownCommand(), Seq.empty[String])
-          }
-          res match {
-            case Left(err)       => ("", ShowError(err))
-            case Right((cmd, _)) => ("", cmd)
-          }
-        }
-      }
-
-    writeCommandLog()
-
-    val response = command match {
-      case params: ShowError            => Left(params.err.message)
-      case _: Ping                      => ping()
-      case _: GetInfo                   => getInfo()
-      case params: RequestHostedChannel => requestHC(params)
-      case params: CreateInvoice        => createInvoice(params)
-      case params: PayInvoice           => payInvoice(params)
-      case params: CheckPayment         => checkPayment(params)
-      case params: ListPayments         => listPayments(params)
-      case params: RemoveHostedChannel  => removeHC(params)
-      case params: AcceptOverride       => acceptOverride(params)
-      case _                            => Left(s"unhandled command $command")
-    }
-
-    response match {
-      case Left(err) => {
-        updateLog(s"error: $err")
-
-        printjson(
-          // @formatter:off
-          ("id" -> id) ~~
-          ("error" ->
-            (("message" -> err) ~~
-             ("code" -> 1))
-          )
-          // @formatter:on
-        )
-      }
-      case Right(result) => {
-        updateLog("success")
-        printjson(("id" -> id) ~~ ("result" -> result))
-      }
-    }
-
-    // filter out commands older than 10 minutes
-    commandLog.filterInPlace((time, _) =>
-      time > Calendar.getInstance().getTime().getTime() - 10 * 60 * 1000
-    )
-    writeCommandLog()
+  def renderjson(x: JValue): String = Config.compactJSON match {
+    case true  => JsonMethods.compact(JsonMethods.render(x))
+    case false => JsonMethods.pretty(JsonMethods.render(x))
   }
 
   def ping(): Either[String, JValue] = Right(("ping" -> "pong"))
@@ -266,12 +133,12 @@ object Commands {
           LNParams.cm
         ) {
           def onException: Unit = {
-            printjson(("event" -> "hc_creation_exception"))
+            renderjson(("event" -> "hc_creation_exception"))
           }
 
           // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
           def onFailure(reason: Throwable) = {
-            printjson(
+            renderjson(
               // @formatter:off
               ("event" -> "hc_creation_failed") ~~
               ("reason" -> reason.toString())
@@ -280,7 +147,7 @@ object Commands {
           }
 
           def onEstablished(cs: Commitments, freshChannel: ChannelHosted) = {
-            printjson(
+            renderjson(
               // @formatter:off
               ("event" -> "hc_creation_succeeded") ~~
               ("channel_id" -> cs.channelId.toHex) ~~
@@ -611,7 +478,7 @@ object Commands {
   }
 
   def onPaymentFailed(data: OutgoingPaymentSenderData): Unit =
-    printjson(
+    renderjson(
       // @formatter:off
       ("event" -> "payment_failed") ~~
       ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
@@ -628,7 +495,7 @@ object Commands {
     val msatoshi =
       data.inFlightParts.map(_.cmd.firstAmount.toLong).fold[Long](0)(_ + _)
 
-    printjson(
+    renderjson(
       // @formatter:off
       ("event" -> "payment_succeeded") ~~
       ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
@@ -644,7 +511,7 @@ object Commands {
   def onPaymentReceived(r: IncomingRevealed): Unit = {
     LNParams.cm.payBag.getPaymentInfo(r.fullTag.paymentHash).toOption match {
       case Some(info) =>
-        printjson(
+        renderjson(
           // @formatter:off
           ("event" -> "payment_received") ~~
           ("preimage" -> info.preimage.toHex) ~~
@@ -656,5 +523,5 @@ object Commands {
     }
   }
 
-  def onReady(): Unit = printjson(("event" -> "ready"))
+  def onReady(): Unit = renderjson(("event" -> "ready"))
 }
