@@ -477,7 +477,7 @@ object Commands {
     // @formatter:on
   }
 
-  def onPaymentFailed(data: OutgoingPaymentSenderData): Unit =
+  def onPaymentFailed(data: OutgoingPaymentSenderData): String =
     renderjson(
       // @formatter:off
       ("event" -> "payment_failed") ~~
@@ -491,7 +491,7 @@ object Commands {
   def onPaymentSucceeded(
       data: OutgoingPaymentSenderData,
       fulfill: RemoteFulfill
-  ): Unit = {
+  ): String = {
     val msatoshi =
       data.inFlightParts.map(_.cmd.firstAmount.toLong).fold[Long](0)(_ + _)
 
@@ -508,20 +508,28 @@ object Commands {
     )
   }
 
-  def onPaymentReceived(r: IncomingRevealed): Unit = {
+  def onPaymentReceived(r: IncomingRevealed): String = {
     LNParams.cm.payBag.getPaymentInfo(r.fullTag.paymentHash).toOption match {
       case Some(info) =>
         renderjson(
           // @formatter:off
           ("event" -> "payment_received") ~~
-          ("preimage" -> info.preimage.toHex) ~~
+          ("preimage" -> r.preimage.toHex) ~~
           ("msatoshi" -> info.received.toLong) ~~
           ("payment_hash" -> r.fullTag.paymentHash.toHex)
           // @formatter:on
         )
-      case None => {}
+      case None =>
+        renderjson(
+          // @formatter:off
+          ("event" -> "payment_received") ~~
+          ("preimage" -> r.preimage.toHex) ~~
+          ("msatoshi" -> 0L) ~~
+          ("payment_hash" -> r.fullTag.paymentHash.toHex)
+          // @formatter:on
+        )
     }
   }
 
-  def onReady(): Unit = renderjson(("event" -> "ready"))
+  def onReady(): String = renderjson(("event" -> "ready"))
 }

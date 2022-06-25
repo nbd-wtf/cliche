@@ -1,10 +1,13 @@
 import java.net.InetSocketAddress
 import scala.annotation.nowarn
 import scala.concurrent.Future
-import cats.syntax.all._
+import cats.Parallel.parTuple4
 import cats.effect.{IO, IOApp, ExitCode}
+import cats.effect.std.{Queue, Dispatcher}
+import fs2.Stream
+import fs2.concurrent.Topic
 import com.softwaremill.quicklens._
-import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
+// import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
 import castor.Context.Simple.global
 import fr.acinq.eclair.{MilliSatoshi}
 import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
@@ -58,11 +61,12 @@ import immortan.utils.{
 import immortan.crypto.Tools.{~, none, Any2Some}
 
 import utils.RequestsConnectionProvider
+import scala.concurrent.duration.FiniteDuration
 
 object Main extends IOApp.Simple {
   def init(): Unit = {
-    // prevent netty/electrumclient to flood us with logs
-    InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
+    // prevent netty to flood us with logs
+    // InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
 
     // print the configs we read
     Config.print()
@@ -383,50 +387,56 @@ object Main extends IOApp.Simple {
       fiatObs.foreach(LNParams.fiatRates.updateInfo, none)
     }
     println(s"# is operational: ${LNParams.isOperational}")
-
-    println("# listening for outgoing payments")
-    LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
-      override def wholePaymentFailed(data: OutgoingPaymentSenderData): Unit =
-        Commands.onPaymentFailed(data)
-      override def gotFirstPreimage(
-          data: OutgoingPaymentSenderData,
-          fulfill: RemoteFulfill
-      ): Unit = Commands.onPaymentSucceeded(data, fulfill)
-    }
-
-    println("# listening for incoming payments")
-    ChannelMaster.inFinalized
-      .collect { case revealed: IncomingRevealed => revealed }
-      .subscribe(r => Commands.onPaymentReceived(r))
   }
 
   override final val run: IO[Unit] = {
     init()
 
-    println("# waiting for commands")
-    Commands.onReady()
+    // API outgoing events
+    Topic[IO, String].flatMap { topic =>
+      val d = Dispatcher[IO].use { dispatcher =>
+        for {
+          _ <- IO.delay {
+            dispatcher.unsafeRunAndForget(
+              topic.publish1(Commands.onReady()) >> IO.unit
+            )
+            LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
+              override def wholePaymentFailed(
+                  data: OutgoingPaymentSenderData
+              ): Unit =
+                dispatcher.unsafeRunAndForget(
+                  topic.publish1(Commands.onPaymentFailed(data)) >> IO.unit
+                )
 
-    // ------------------- ignore this part between the lines
-    if (Config.nativeImageAgent) {
-      Thread.sleep(5000)
-      fr.acinq.eclair.randomBytes(16)
-      Handler.handle(
-        "request-hc --host 107.189.30.195 --port 9734 --pubkey 03ee58475055820fbfa52e356a8920f62f8316129c39369dbdde3e5d0198a9e315"
-      )
-      Handler.handle("get-info")
-      Thread.sleep(5000)
-      Handler.handle("create-invoice --msatoshi 987654")
-      Handler.handle(
-        "pay-invoice --invoice lnbc200n1p3txsgcpp5he23745cajnqu3lmglwsyzvtxqan3xlt9kusuq2qju6l8y2xsersdp2ve5kzar2v9nr5gpqdeshg6tkv5kkjmtpvajjqun4dcsp5f6xkd25epetwehzv7xzzaj59sc04q5dn2knu2ac05pmxz46u3sxqxqy9gcqcqzys9qrsgqrzjqd98kxkpyw0l9tyy8r8q57k7zpy9zjmh6sez752wj6gcumqnj3yxzhdsmg6qq56utgqqqqqqqqqqqeqqjqrzjqtx3k77yrrav9hye7zar2rtqlfkytl094dsp0ms5majzth6gt7ca6uhdkxl983uywgqqqqqqqqqq86qqjqrzjq0h9s36s2kpql0a99c6k4zfq7chcx9sjnsund8damcl96qvc4833tx69gvk26e6efsqqqqlgqqqqpjqqjq8dracgxedjhrtj2xuuvgzgssqfkz4v4xw0yhfans08w4n00swyrrpg87dvcuenzcaym0jmfv2v6ztuw4sec9flu9v8p76t23r2pjtjcp89j9zf"
-      )
-      Thread.sleep(5000)
-      scala.sys.exit()
+              override def gotFirstPreimage(
+                  data: OutgoingPaymentSenderData,
+                  fulfill: RemoteFulfill
+              ): Unit =
+                dispatcher.unsafeRunAndForget(
+                  topic.publish1(
+                    Commands.onPaymentSucceeded(data, fulfill)
+                  ) >> IO.unit
+                )
+            }
+
+            ChannelMaster.inFinalized
+              .collect { case revealed: IncomingRevealed => revealed }
+              .subscribe(r =>
+                dispatcher.unsafeRunAndForget(
+                  topic.publish1(Commands.onPaymentReceived(r)) >> IO.unit
+                )
+              )
+          }
+          _ <- IO.never[Unit]
+        } yield ()
+      }
+
+      parTuple4[IO, Unit, Unit, Unit, Unit](
+        d,
+        new ServerApp(topic).stream.compile.drain,
+        new StdinApp(topic).run(),
+        new StdoutApp(topic).run()
+      ).void
     }
-    // ------------------- nothing to see here
-
-    (
-      new ServerApp[IO].stream.compile.drain,
-      new StdinApp[IO].run()
-    ).parTupled.void
   }
 }

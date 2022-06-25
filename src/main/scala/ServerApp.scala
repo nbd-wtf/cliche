@@ -1,7 +1,8 @@
 import cats.effect._
 import cats.effect.std.Queue
 import cats.syntax.all._
-import fs2._
+import fs2.{Stream, Pipe}
+import fs2.concurrent.Topic
 import org.http4s._
 import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.dsl.Http4sDsl
@@ -12,29 +13,30 @@ import org.http4s.websocket.WebSocketFrame._
 
 import scala.concurrent.duration._
 
-class ServerApp[F[_]](implicit F: Async[F]) extends Http4sDsl[F] {
-  def routes(wsb: WebSocketBuilder[F]): HttpRoutes[F] =
-    HttpRoutes.of[F] {
+class ServerApp(topic: Topic[IO, String])(implicit F: Async[IO])
+    extends Http4sDsl[IO] {
+  def routes(wsb: WebSocketBuilder[IO]): HttpRoutes[IO] =
+    HttpRoutes.of[IO] {
       case POST -> Root => Ok("~")
-      case GET -> Root =>
-        val handleCommand: Pipe[F, WebSocketFrame, WebSocketFrame] =
-          _.collect {
-            case Text(msg, _) => Text(Handler.handle(msg))
-            case other        => Text(s"unexpected websocket message: $other")
-          }
+      case GET -> Root => {
+        def process(input: WebSocketFrame): IO[Unit] = input match {
+          case Text(msg, _) =>
+            topic.publish1(Handler.handle(msg)) >> IO.unit
+          case other => IO.println(s"# unexpected websocket message: $other")
+        }
 
-        Queue
-          .unbounded[F, Option[WebSocketFrame]]
-          .flatMap { q =>
-            val out: Stream[F, WebSocketFrame] =
-              Stream.fromQueueNoneTerminated(q).through(handleCommand)
-            val in: Pipe[F, WebSocketFrame, Unit] = _.enqueueNoneTerminated(q)
-            wsb.build(out, in)
-          }
+        val out: Stream[IO, WebSocketFrame] =
+          topic.subscribe(25).map(Text(_))
+
+        val in: Pipe[IO, WebSocketFrame, Unit] =
+          _.foreach(process)
+
+        wsb.build(out, in)
+      }
     }
 
-  def stream: Stream[F, ExitCode] =
-    BlazeServerBuilder[F]
+  def stream: Stream[IO, ExitCode] =
+    BlazeServerBuilder[IO]
       .bindHttp(12000, "127.0.0.1")
       .withHttpWebSocketApp(routes(_).orNotFound)
       .serve
