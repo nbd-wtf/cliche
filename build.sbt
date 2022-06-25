@@ -28,6 +28,7 @@ nativeImageInstalled := true
 
 nativeImageOptions += "-H:+ReportUnsupportedElementsAtRuntime"
 nativeImageOptions += "--initialize-at-build-time=scala.Symbol$"
+nativeImageOptions += "--initialize-at-build-time=org.slf4j.LoggerFactory"
 nativeImageOptions += "--allow-incomplete-classpath"
 
 nativeImageOptions += s"-H:ConfigurationFileDirectories=${target.value / ".." / "native-image-configs" }"
