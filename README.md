@@ -12,7 +12,7 @@ In that directory you can have a file called `cliche.conf` that can have the sam
 
 ### Running the native image (no JVM required)
 
-Download the native image from the [releases page](https://github.com/fiatjaf/cliche/releases) and run it with `./cliche`. All the rest is the same as above except it doesn't require a Java Virtual Machine at all (also starts much faster and who knows, maybe it's faster and leaner too but that remains to be proven).
+Download the native image from the [releases page](https://github.com/fiatjaf/cliche/releases), call `chmod +x` on it and run it with `./cliche`. All the rest is the same as above except it doesn't require a Java Virtual Machine at all (also starts much faster and who knows, maybe it's faster and leaner too but that remains to be proven).
 
 To pass options just do `./cliche -Dcliche.datadir=etc`.
 
