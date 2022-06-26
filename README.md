@@ -18,10 +18,12 @@ To pass options just do `./cliche -Dcliche.datadir=etc`.
 
 ## Usage
 
+`cliche` can be used either via direct communication via STDIN with responses via STDOUT or through a websocket (that is hardcoded to listen at `ws://127.0.0.1:12000`). Both interfaces accept either CLI-style commands or JSON-RPC.
+
 This is an example session with some commands called and asynchronous events being received:
 
 ```
-~> java -jar cliche.jar
+~> ./cliche
 # initial parameters
 # configs: network=mainnet json.compact=false
 # setting up database
@@ -120,9 +122,21 @@ The same methods can be called either with this CLI-like format or with JSON-RPC
 {"id":"x","method":"create-invoice","params":{"msatoshi":164000}}
 ```
 
+## Casual Usage
+
+For casual usage you'll want the CLI-style commands format, so you can just type `create-invoice --msatoshi 100000 --description test`, for example, and get a response in your terminal.
+
+- The STDIN/STDOUT interface works best if you're just running `cliche` in a terminal. In that case you can just use that same terminal window to execute commands.
+- The websocket interface works fine too, specially if `cliche` is running as a service or as a subprocess somewhere else, in that case you can use a CLI tool like [`websocat`](https://github.com/vi/websocat), call `websocat ws://127.0.0.1:12000` then start typing commands.
+
 ## Programmatic Usage
 
-This is intended to be started by a different program and methods to be called by sending data over STDIN and responses from STDOUT. See [go-cliche](https://github.com/fiatjaf/go-cliche) for a library that does that.
+For programmatic usage you'll want the JSON-RPC format so you can distinguish responses by their JSON-RPC ids.
+
+- The STDIN/STDOUT interface can be used if a different program (i.e. your Lightning-powered application) actually starts `cliche` as a subprocess, then proceeds to write commands to its STDIN and listen to its STDOUT for responses and event notifications. See [go-cliche](https://github.com/fiatjaf/go-cliche) for a library that does that.
+- The websocket interface can be used too if `cliche` is running as a standalone service -- for example, by systemd, or inside a container. In that case your application just needs to open a websocket connection to `ws://127.0.0.1` and start sending commands and listening for responses and event notifications.
+
+This is intended to be started by a different program and methods to be called by sending data over STDIN and responses from STDOUT.
 
 ## API
 
@@ -162,7 +176,7 @@ If your `build.sbt` happen to have an Immortan version ending with `-SNAPSHOT` t
 
 ## Uses
 
-This is a list of projects using Cliché:
+This is a list of projects using `cliche`:
 
   - [@lntxbot](https://github.com/fiatjaf/lntxbot), a Telegram bot that does Lightning tips and payments
   - [LNbits Infinity](https://github.com/lnbits/infinity), a multipurpose extensible web Lightning Wallet provider
