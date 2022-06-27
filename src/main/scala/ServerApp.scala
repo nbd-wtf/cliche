@@ -13,20 +13,21 @@ import org.http4s.websocket.WebSocketFrame._
 
 import scala.concurrent.duration._
 
-class ServerApp(topic: Topic[IO, String])(implicit F: Async[IO])
-    extends Http4sDsl[IO] {
+class ServerApp()(
+    implicit F: Async[IO],
+    implicit val topic: Topic[IO, JSONRPCMessage]
+) extends Http4sDsl[IO] {
   def routes(wsb: WebSocketBuilder[IO]): HttpRoutes[IO] =
     HttpRoutes.of[IO] {
       case POST -> Root => Ok("~")
       case GET -> Root => {
         def process(input: WebSocketFrame): IO[Unit] = input match {
-          case Text(msg, _) =>
-            topic.publish1(Handler.handle(msg)) >> IO.unit
+          case Text(msg, _) => Handler.handle(msg)
           case other => IO.println(s"# unexpected websocket message: $other")
         }
 
         val out: Stream[IO, WebSocketFrame] =
-          topic.subscribe(25).map(Text(_))
+          topic.subscribe(25).map(_.render(true)).map(Text(_))
 
         val in: Pipe[IO, WebSocketFrame, Unit] =
           _.foreach(process)

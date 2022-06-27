@@ -86,10 +86,12 @@ l9tyy8r8q57k7zpy9zjmh6sez752wj6gcumqnj3yxrxwuy87r6hvpnuqqqqqqqqqqqeqqjqq7wrpaz4d
   }
 }
 {
-  "event":"payment_received",
-  "preimage":"51a012f6b18360ed65c3960ebb17ab84120d022768ffb887e82e56463bc729c0",
-  "msatoshi":12000,
-  "payment_hash":"fa57f7c1ef69c9a38f2aa95023ea1edef0ba8decfc43525d867772685371215b"
+  "method":"payment_received",
+  "params":{
+    "preimage":"51a012f6b18360ed65c3960ebb17ab84120d022768ffb887e82e56463bc729c0",
+    "msatoshi":12000,
+    "payment_hash":"fa57f7c1ef69c9a38f2aa95023ea1edef0ba8decfc43525d867772685371215b"
+  }
 }
 pay-invoice --invoice lnbc120n1p3ys2znpp5ecudgkjpffs9unvcp2pxws3gjs9sm5u78y340cns330vdtn3req
 sdpuve5kzar2v9nr5gpqw35xjueqd9ejqctwypjhsar9wfhxzmpqd9h8vmmfvdjssp5tlzrfn3slaqude9wvl20cn9zm
@@ -107,12 +109,14 @@ xzhdsmg6qq56utgqqqqqqqqqqqeqqjqurvsq6w7pjse26vyuxta4d9e0w03g2tw3yajks73parppz3dj
   }
 }
 {
-  "event":"payment_succeeded",
-  "payment_hash":"ce38d45a414a605e4d980a82674228940b0dd39e392357e2708c5ec6ae711e41",
-  "fee_msatoshi":1,
-  "msatoshi":12001,
-  "preimage":"0000001124019af4833f82681916f6948e31a4408e53c6427944b4f8dea74670",
-  "parts":1
+  "method":"payment_succeeded",
+  "params":{
+    "payment_hash":"ce38d45a414a605e4d980a82674228940b0dd39e392357e2708c5ec6ae711e41",
+    "fee_msatoshi":1,
+    "msatoshi":12001,
+    "preimage":"0000001124019af4833f82681916f6948e31a4408e53c6427944b4f8dea74670",
+    "parts":1
+  }
 }
 ```
 
@@ -150,7 +154,7 @@ This is intended to be started by a different program and methods to be called b
 - `list-payments`, params: `count` (optional, int)
 - `accept-override`, params: `channel-id` (string)
 
-### Events
+### Notifications
 
 - `ready`
 - `payment_succeeded`

@@ -2,10 +2,14 @@ import cats.effect._
 import fs2.Pipe
 import fs2.concurrent.Topic
 
-class StdoutApp(topic: Topic[IO, String])(implicit F: Async[IO]) {
+class StdoutApp()(
+    implicit F: Async[IO],
+    implicit val topic: Topic[IO, JSONRPCMessage]
+) {
   def run(): IO[Unit] = {
     topic
       .subscribe(25)
+      .map(_.render())
       .foreach(IO.println(_))
       .compile
       .drain

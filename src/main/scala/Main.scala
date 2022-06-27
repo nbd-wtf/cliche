@@ -2,8 +2,8 @@ import java.net.InetSocketAddress
 import scala.annotation.nowarn
 import scala.concurrent.Future
 import cats.Parallel.parTuple4
-import cats.effect.{IO, IOApp, ExitCode}
-import cats.effect.std.{Queue, Dispatcher}
+import cats.effect.{IO, IOApp}
+import cats.effect.std.Dispatcher
 import fs2.Stream
 import fs2.concurrent.Topic
 import com.softwaremill.quicklens._
@@ -393,7 +393,7 @@ object Main extends IOApp.Simple {
     init()
 
     // API outgoing events
-    Topic[IO, String].flatMap { topic =>
+    Topic[IO, JSONRPCMessage].flatMap { implicit topic =>
       val d = Dispatcher[IO].use { dispatcher =>
         for {
           _ <- IO.delay {
@@ -433,9 +433,9 @@ object Main extends IOApp.Simple {
 
       parTuple4[IO, Unit, Unit, Unit, Unit](
         d,
-        new ServerApp(topic).stream.compile.drain,
-        new StdinApp(topic).run(),
-        new StdoutApp(topic).run()
+        new ServerApp().stream.compile.drain,
+        new StdinApp().run(),
+        new StdoutApp().run()
       ).void
     }
   }
