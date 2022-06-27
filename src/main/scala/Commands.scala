@@ -1,6 +1,5 @@
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
-import org.json4s._
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
 import org.json4s.JsonAST.{JValue, JObject, JArray}
@@ -30,29 +29,9 @@ import immortan.{
   PaymentInfo,
   CommsTower
 }
-import immortan.utils.PaymentRequestExt
+import immortan.utils.{PaymentRequestExt, BitcoinUri}
 import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
-
-sealed trait Command
-case class UnknownCommand(method: String) extends Command
-case class ShowError(err: caseapp.core.Error) extends Command
-case class Ping() extends Command
-case class GetInfo() extends Command
-case class RequestHostedChannel(pubkey: String, host: String, port: Int)
-    extends Command
-case class CreateInvoice(
-    description: Option[String],
-    description_hash: Option[String],
-    msatoshi: Option[Long],
-    preimage: Option[String],
-    label: Option[String]
-) extends Command
-case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
-case class CheckPayment(hash: String) extends Command
-case class ListPayments(count: Option[Int]) extends Command
-case class RemoveHostedChannel(id: String) extends Command
-case class AcceptOverride(channelId: String) extends Command
 
 sealed trait JSONRPCMessage {
   def render(forceCompact: Boolean = false): String = {
@@ -85,8 +64,6 @@ case class JSONRPCNotification(method: String, params: JValue)
     extends JSONRPCMessage
 
 object Commands {
-  implicit val formats: Formats = DefaultFormats
-
   def ping()(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] =
     topic.publish1(JSONRPCResponse(id, ("ping" -> "pong"))) >> IO.unit
 
@@ -490,6 +467,60 @@ object Commands {
         ) >> IO.unit
     }
   }
+
+  def getAddress()(implicit
+      id: String,
+      topic: Topic[IO, JSONRPCMessage]
+  ): IO[Unit] = {
+    implicit val ec: scala.concurrent.ExecutionContext =
+      scala.concurrent.ExecutionContext.global
+
+    Dispatcher[IO].use { dispatcher =>
+      for {
+        blocker <- CountDownLatch[IO](1)
+        _ <- IO.delay {
+          LNParams.chainWallets.wallets.head.getReceiveAddresses
+            .onComplete {
+              case Success(resp) => {
+                val address = resp.keys
+                  .take(1)
+                  .map(resp.ewt.textAddress)
+                  .head
+
+                dispatcher.unsafeRunAndForget(
+                  topic.publish1(
+                    JSONRPCResponse(
+                      id,
+                      ("address" -> address)
+                    )
+                  )
+                )
+                dispatcher.unsafeRunAndForget(blocker.release)
+              }
+              case Failure(err) => {
+                dispatcher.unsafeRunAndForget(
+                  topic.publish1(JSONRPCError(id, err.toString()))
+                )
+                dispatcher.unsafeRunAndForget(blocker.release)
+              }
+            }
+        }
+        _ <- blocker.await
+      } yield ()
+    }
+  }
+
+  def sendToAddress(
+      params: SendToAddress
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = IO.stub
+
+  def openNC(
+      params: OpenNormalChannel
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = IO.stub
+
+  def closeNC(
+      params: CloseNormalChannel
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = IO.stub
 
   def acceptOverride(
       params: AcceptOverride
