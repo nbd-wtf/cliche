@@ -7,7 +7,6 @@ import cats.effect.std.Dispatcher
 import fs2.Stream
 import fs2.concurrent.Topic
 import com.softwaremill.quicklens._
-// import io.netty.util.internal.logging.{InternalLoggerFactory, JdkLoggerFactory}
 import castor.Context.Simple.global
 import fr.acinq.eclair.{MilliSatoshi}
 import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
@@ -65,9 +64,6 @@ import scala.concurrent.duration.FiniteDuration
 
 object Main extends IOApp.Simple {
   def init(): Unit = {
-    // prevent netty to flood us with logs
-    // InternalLoggerFactory.setDefaultFactory(JdkLoggerFactory.INSTANCE)
-
     // print the configs we read
     Config.print()
 
