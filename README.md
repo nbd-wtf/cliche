@@ -160,9 +160,6 @@ This is intended to be started by a different program and methods to be called b
 - `payment_succeeded`
 - `payment_failed`
 - `payment_received`
-- `hc_creation_exception`
-- `hc_creation_succeeded`
-- `hc_creation_failed`
 
 ## Building and development
 

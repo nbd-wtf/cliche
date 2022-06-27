@@ -1,5 +1,6 @@
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.FiniteDuration
 import org.json4s.native.JsonMethods
 import org.json4s.JsonDSL.WithDouble._
 import org.json4s.JsonAST.{JValue, JObject, JArray}
@@ -144,82 +145,80 @@ object Commands {
       case (_, Left(_)) =>
         topic.publish1(JSONRPCError(id, ("invalid node address or port")))
       case (Some(pubkey), Right(target)) =>
-        topic.publish1(
-          JSONRPCResponse(id, "channel_being_created" -> true)
-        ) >>
-          Dispatcher[IO].use { dispatcher =>
-            for {
-              blocker <- CountDownLatch[IO](1)
-              _ <- IO.delay {
-                new HCOpenHandler(
-                  target,
-                  randomBytes32,
-                  localParams.defaultFinalScriptPubKey,
-                  LNParams.cm
-                ) {
-                  def onException: Unit = {
-                    dispatcher.unsafeRunAndForget(
-                      topic.publish1(
-                        JSONRPCNotification(
-                          "hc_creation_exception",
-                          JObject(List.empty)
-                        )
-                      )
-                    )
-                    dispatcher.unsafeRunAndForget(blocker.release)
-                  }
+        Dispatcher[IO].use { dispatcher =>
+          for {
+            blocker <- CountDownLatch[IO](1)
+            _ <- IO.delay {
+              val cancel = dispatcher.unsafeRunCancelable(
+                IO.sleep(FiniteDuration(5, "seconds")) >>
+                  topic.publish1(
+                    JSONRPCError(id, "taking too long")
+                  ) >> blocker.release
+              )
 
-                  // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
-                  def onFailure(reason: Throwable) = {
-                    dispatcher.unsafeRunAndForget(
-                      topic.publish1(
-                        JSONRPCNotification(
-                          "hc_creation_failed",
-                          ("reason" -> reason.toString())
-                        )
-                      )
-                    )
-                    dispatcher.unsafeRunAndForget(blocker.release)
-                  }
+              new HCOpenHandler(
+                target,
+                randomBytes32,
+                localParams.defaultFinalScriptPubKey,
+                LNParams.cm
+              ) {
+                def onException: Unit = {
+                  cancel()
+                  dispatcher.unsafeRunAndForget(
+                    topic.publish1(JSONRPCError(id, "exception"))
+                  )
+                  dispatcher.unsafeRunAndForget(blocker.release)
+                }
 
-                  def onEstablished(
-                      cs: Commitments,
-                      freshChannel: ChannelHosted
-                  ) = {
-                    dispatcher.unsafeRunAndForget(
-                      topic.publish1(
-                        JSONRPCNotification(
-                          "hc_creation_succeeded",
-                          (
-                            // @formatter:off
-                            ("channel_id" -> cs.channelId.toHex) ~~
-                            ("peer" ->
-                              (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
-                               ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
-                               ("addr" -> cs.remoteInfo.address.toString())
-                            )
-                            // @formatter:on
+                // stop automatic HC opening attempts on getting any kind of local/remote error,
+                // this won't be triggered on disconnect
+                def onFailure(reason: Throwable) = {
+                  cancel()
+                  dispatcher.unsafeRunAndForget(
+                    topic.publish1(JSONRPCError(id, reason.toString()))
+                  )
+                  dispatcher.unsafeRunAndForget(blocker.release)
+                }
+
+                def onEstablished(
+                    cs: Commitments,
+                    freshChannel: ChannelHosted
+                ) = {
+                  cancel()
+                  dispatcher.unsafeRunAndForget(
+                    topic.publish1(
+                      JSONRPCResponse(
+                        id,
+                        (
+                          // @formatter:off
+                          ("channel_id" -> cs.channelId.toHex) ~~
+                          ("peer" ->
+                            (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
+                             ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
+                             ("addr" -> cs.remoteInfo.address.toString())
                           )
+                          // @formatter:on
                         )
                       )
                     )
-                    dispatcher.unsafeRunAndForget(blocker.release)
+                  )
+                  dispatcher.unsafeRunAndForget(blocker.release)
 
-                    LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
-                    LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
+                  LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
+                  LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
 
-                    // this removes all previous channel listeners
-                    freshChannel.listeners = Set(LNParams.cm)
-                    LNParams.cm.initConnect()
+                  // this removes all previous channel listeners
+                  freshChannel.listeners = Set(LNParams.cm)
+                  LNParams.cm.initConnect()
 
-                    // update view on hub activity and finalize local stuff
-                    ChannelMaster.next(ChannelMaster.statusUpdateStream)
-                  }
+                  // update view on hub activity and finalize local stuff
+                  ChannelMaster.next(ChannelMaster.statusUpdateStream)
                 }
               }
-              _ <- blocker.await
-            } yield ()
-          }
+            }
+            _ <- blocker.await
+          } yield ()
+        }
     }) >> IO.unit
   }
 
