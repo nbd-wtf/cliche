@@ -167,83 +167,83 @@ object Commands {
       case (_, Left(_)) =>
         topic.publish1(JSONRPCError(id, ("invalid node address or port")))
       case (Some(pubkey), Right(target)) =>
-        Dispatcher[IO].use { dispatcher =>
-          for {
-            blocker <- CountDownLatch[IO](1)
-            _ <- IO.delay {
-              new HCOpenHandler(
-                target,
-                randomBytes32,
-                localParams.defaultFinalScriptPubKey,
-                LNParams.cm
-              ) {
-                def onException: Unit = {
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(
-                      JSONRPCNotification(
-                        "hc_creation_exception",
-                        JObject(List.empty)
-                      )
-                    )
-                  )
-                  dispatcher.unsafeRunAndForget(blocker.release)
-                }
-
-                // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
-                def onFailure(reason: Throwable) = {
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(
-                      JSONRPCNotification(
-                        "hc_creation_failed",
-                        ("reason" -> reason.toString())
-                      )
-                    )
-                  )
-                  dispatcher.unsafeRunAndForget(blocker.release)
-                }
-
-                def onEstablished(
-                    cs: Commitments,
-                    freshChannel: ChannelHosted
-                ) = {
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(
-                      JSONRPCNotification(
-                        "hc_creation_succeeded",
-                        (
-                          // @formatter:off
-                          ("channel_id" -> cs.channelId.toHex) ~~
-                          ("peer" ->
-                            (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
-                             ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
-                             ("addr" -> cs.remoteInfo.address.toString())
-                          )
-                          // @formatter:on
+        topic.publish1(
+          JSONRPCResponse(id, "channel_being_created" -> true)
+        ) >>
+          Dispatcher[IO].use { dispatcher =>
+            for {
+              blocker <- CountDownLatch[IO](1)
+              _ <- IO.delay {
+                new HCOpenHandler(
+                  target,
+                  randomBytes32,
+                  localParams.defaultFinalScriptPubKey,
+                  LNParams.cm
+                ) {
+                  def onException: Unit = {
+                    dispatcher.unsafeRunAndForget(
+                      topic.publish1(
+                        JSONRPCNotification(
+                          "hc_creation_exception",
+                          JObject(List.empty)
                         )
                       )
                     )
-                  )
+                    dispatcher.unsafeRunAndForget(blocker.release)
+                  }
 
-                  dispatcher.unsafeRunAndForget(blocker.release)
+                  // Stop automatic HC opening attempts on getting any kind of local/remote error, this won't be triggered on disconnect
+                  def onFailure(reason: Throwable) = {
+                    dispatcher.unsafeRunAndForget(
+                      topic.publish1(
+                        JSONRPCNotification(
+                          "hc_creation_failed",
+                          ("reason" -> reason.toString())
+                        )
+                      )
+                    )
+                    dispatcher.unsafeRunAndForget(blocker.release)
+                  }
 
-                  LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
-                  LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
+                  def onEstablished(
+                      cs: Commitments,
+                      freshChannel: ChannelHosted
+                  ) = {
+                    dispatcher.unsafeRunAndForget(
+                      topic.publish1(
+                        JSONRPCNotification(
+                          "hc_creation_succeeded",
+                          (
+                            // @formatter:off
+                            ("channel_id" -> cs.channelId.toHex) ~~
+                            ("peer" ->
+                              (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
+                               ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
+                               ("addr" -> cs.remoteInfo.address.toString())
+                            )
+                            // @formatter:on
+                          )
+                        )
+                      )
+                    )
+                    dispatcher.unsafeRunAndForget(blocker.release)
 
-                  // this removes all previous channel listeners
-                  freshChannel.listeners = Set(LNParams.cm)
-                  LNParams.cm.initConnect()
+                    LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
+                    LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
 
-                  // update view on hub activity and finalize local stuff
-                  ChannelMaster.next(ChannelMaster.statusUpdateStream)
+                    // this removes all previous channel listeners
+                    freshChannel.listeners = Set(LNParams.cm)
+                    LNParams.cm.initConnect()
+
+                    // update view on hub activity and finalize local stuff
+                    ChannelMaster.next(ChannelMaster.statusUpdateStream)
+                  }
                 }
               }
-            }
-            _ <- blocker.await.start
-          } yield ()
-        }
-    }) >> topic.publish1(
-      JSONRPCResponse(id, "channel_being_created" -> true)
-    ) >> IO.unit
+              _ <- blocker.await
+            } yield ()
+          }
+    }) >> IO.unit
   }
 
   def createInvoice(
