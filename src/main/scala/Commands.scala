@@ -40,6 +40,7 @@ sealed trait JSONRPCMessage {
       case JSONRPCError(id, err) =>
         (
           // @formatter:off
+          ("jsonrpc" -> "2.0") ~~
           ("id" -> id) ~~
           ("error" ->
             (("message" -> err) ~~
@@ -48,9 +49,9 @@ sealed trait JSONRPCMessage {
           // @formatter:on
         )
       case JSONRPCResponse(id, result) =>
-        (("id" -> id) ~~ ("result" -> result))
+        (("jsonrpc" -> "2.0") ~~ ("id" -> id) ~~ ("result" -> result))
       case JSONRPCNotification(method, params) =>
-        (("method" -> method) ~~ ("params" -> params))
+        (("jsonrpc" -> "2.0") ~~ ("method" -> method) ~~ ("params" -> params))
     }
 
     (forceCompact || Config.compactJSON) match {
