@@ -26,14 +26,16 @@ nativeImageInstalled := true
 // instead of uncommenting this line, export GRAALVM_HOME=/usr/lib/etc/graalvm-jvm...
 // nativeImageGraalHome := Paths.get("/usr/lib/jvm/graalvm-svm-java11-linux-gluon-22.0.0.3-Final/")
 
-nativeImageOptions += "-H:+ReportUnsupportedElementsAtRuntime"
-nativeImageOptions += "--initialize-at-build-time=scala.Symbol$"
-nativeImageOptions += "--initialize-at-build-time=org.slf4j.LoggerFactory"
-nativeImageOptions += "--allow-incomplete-classpath"
+nativeImageOptions ++= Seq(
+  "-H:+ReportUnsupportedElementsAtRuntime",
+  "--initialize-at-build-time=scala.Symbol$",
+  "--initialize-at-build-time=org.slf4j.LoggerFactory",
+  "--allow-incomplete-classpath",
 
-nativeImageOptions += s"-H:ConfigurationFileDirectories=${target.value / ".." / "native-image-configs" }"
-nativeImageOptions +="-H:+JNI"
-nativeImageOptions += "--no-fallback"
+  s"-H:ConfigurationFileDirectories=${target.value / ".." / "native-image-configs" }",
+  "-H:+JNI",
+  "--no-fallback"
+)
 nativeImageAgentOutputDir := target.value / ".." / "native-image-configs"
 
 nativeImageRunAgent / run / javaOptions ++= Seq(
