@@ -394,7 +394,9 @@ object Main extends IOApp.Simple {
         for {
           _ <- IO.delay {
             dispatcher.unsafeRunAndForget(
-              topic.publish1(Commands.onReady()) >> IO.unit
+              IO.sleep(FiniteDuration(3, "seconds")) >> topic.publish1(
+                Commands.onReady()
+              ) >> IO.unit
             )
             LNParams.cm.localPaymentListeners += new OutgoingPaymentListener {
               override def wholePaymentFailed(
