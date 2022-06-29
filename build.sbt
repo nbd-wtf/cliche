@@ -3,9 +3,9 @@ enablePlugins(NativeImagePlugin)
 name                  := "cliche"
 organization          := "fiatjaf"
 scalaVersion          := "2.13.8"
-version               := "0.5.0"
+version               := "0.4.1"
 libraryDependencies   ++= Seq(
-  "com.fiatjaf" % "immortan_2.13" % "0.7.2-SNAPSHOT",
+  "com.fiatjaf" % "immortan_2.13" % "0.7.1",
   "com.github.alexarchambault" % "case-app_2.13" % "2.1.0-M13",
   "com.lihaoyi" % "requests_2.13" % "0.7.0",
   "com.iheart" % "ficus_2.13" % "1.5.0",
