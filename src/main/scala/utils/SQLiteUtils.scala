@@ -4,8 +4,10 @@ import java.sql.{Connection, DriverManager}
 import immortan.sqlite._
 
 object SQLiteUtils {
-  def getConnection(datadir: String): Connection =
-    DriverManager.getConnection(s"jdbc:sqlite:${datadir}/db.sqlite")
+  def getConnection(dbname: String, datadir: String): Connection =
+    DriverManager.getConnection(
+      s"jdbc:sqlite:${datadir}/db-${dbname}.sqlite"
+    )
 
   def interfaceWithTables(con: Connection, tables: Table*): DBInterface = {
     val interface = DBInterfaceSQLiteGeneral(con)

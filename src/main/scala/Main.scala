@@ -102,10 +102,7 @@ object Main extends IOApp.Simple {
       override val maxNodesToSyncFrom = 3
     }
 
-    val walletSeed =
-      MnemonicCode.toSeed(Config.seed, passphrase = new String)
-    val keys = LightningNodeKeys.makeFromSeed(seed = walletSeed.toArray)
-    val secret = WalletSecret(keys, Config.seed, walletSeed)
+    val secret = WalletSecret(Config.seed)
     DB.extDataBag.putSecret(secret)
     LNParams.secret = secret
 

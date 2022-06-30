@@ -1,4 +1,5 @@
 import fr.acinq.eclair.channel.PersistentChannelData
+import immortan.WalletSecret
 import immortan.sqlite.{
   DBInterfaceSQLiteGeneral,
   HostedChannelAnnouncementTable,
@@ -26,7 +27,9 @@ import utils.SQLiteUtils
 object DB {
   println("# setting up database")
 
-  val sqlitedb = SQLiteUtils.getConnection(Config.datadir)
+  val dbname: String =
+    WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
+  val sqlitedb = SQLiteUtils.getConnection(dbname, Config.datadir)
   val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
   val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
   var txDataBag: SQLiteTx = null
