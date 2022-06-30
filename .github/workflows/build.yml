@@ -66,15 +66,15 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: cliche.jar
-          path: ~/download/
+          path: ~/download/cliche.jar
       - uses: actions/download-artifact@v3
         with:
           name: cliche-linux.bin
-          path: ~/download/
+          path: ~/download/cliche-linux.bin
       - uses: actions/download-artifact@v3
         with:
           name: cliche-mac.bin
-          path: ~/download/
+          path: ~/download/cliche-mac.bin
       - uses: marvinpinto/action-automatic-releases@latest
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
