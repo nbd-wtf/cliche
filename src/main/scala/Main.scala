@@ -1,7 +1,7 @@
 import java.net.InetSocketAddress
 import scala.annotation.nowarn
 import scala.concurrent.Future
-import cats.Parallel.parTuple4
+import cats.Parallel.parTuple5
 import cats.effect.{IO, IOApp}
 import cats.effect.std.Dispatcher
 import fs2.Stream
@@ -429,10 +429,19 @@ object Main extends IOApp.Simple {
         } yield ()
       }
 
-      parTuple4[IO, Unit, Unit, Unit, Unit](
+      parTuple5[IO, Unit, Unit, Unit, Unit, Unit](
         d,
+        if (Config.nativeImageAgent) for {
+          _ <- IO.sleep(FiniteDuration(3, "seconds"))
+          _ <- Handler.handle("ping")
+          _ <- Handler.handle("{\"method\":\"get-info\", \"id\":\"0\"}")
+          _ <- Handler.handle(
+            "{\"method\":\"create-invoice\", \"params\":{\"msatoshi\":50000}}"
+          )
+        } yield ()
+        else IO.unit,
         new ServerApp().stream.compile.drain,
-        new StdinApp().run(),
+        if (Config.nativeImageAgent) IO.unit else new StdinApp().run(),
         new StdoutApp().run()
       ).void
     }

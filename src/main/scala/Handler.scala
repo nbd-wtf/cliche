@@ -1,10 +1,7 @@
 import java.text.SimpleDateFormat
 import java.util.{Calendar, Date}
 import java.nio.file.{Files, Path, Paths}
-import org.json4s._
-import org.json4s.native.JsonMethods
-import org.json4s.JsonAST.JValue
-import org.json4s.JsonDSL.WithDouble._
+import spray.json._
 import caseapp.core
 import caseapp.CaseApp
 import fs2.concurrent.Topic
@@ -12,7 +9,7 @@ import cats.effect._
 
 sealed trait Command
 case class UnknownCommand(method: String) extends Command
-case class ShowError(err: caseapp.core.Error) extends Command
+case class ShowError(err: String) extends Command
 case class Ping() extends Command
 case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
@@ -40,7 +37,7 @@ case class CloseNormalChannel(channelId: String) extends Command
 case class AcceptOverride(channelId: String) extends Command
 
 object Handler {
-  implicit val formats: Formats = DefaultFormats
+  import SprayConverters._
 
   def handle(
       input: String
@@ -49,38 +46,44 @@ object Handler {
     else {
       val command =
         try {
-          val parsed: JValue = JsonMethods.parse(input)
-          val id =
-            (
-              try { (parsed \ "id").extract[String] }
-              catch { case _: Throwable => "" }
-            )
-          val method = parsed \ "method"
-          val params = parsed \ "params"
+          val parsed = JsonParser(input).asInstanceOf[JsObject]
+          val (id, method, params) = (
+            parsed.fields
+              .get("id")
+              .map(_.asInstanceOf[JsString].value)
+              .getOrElse(""),
+            parsed.fields
+              .get("method")
+              .map(_.asInstanceOf[JsString].value)
+              .getOrElse(""),
+            parsed.fields.get("params").getOrElse(JsObject.empty)
+          )
 
-          method.extract[String] match {
-            case "ping"            => (id, params.extract[Ping])
-            case "get-info"        => (id, params.extract[GetInfo])
-            case "request-hc"      => (id, params.extract[RequestHostedChannel])
-            case "create-invoice"  => (id, params.extract[CreateInvoice])
-            case "pay-invoice"     => (id, params.extract[PayInvoice])
-            case "check-payment"   => (id, params.extract[CheckPayment])
-            case "list-payments"   => (id, params.extract[ListPayments])
-            case "remove-hc"       => (id, params.extract[RemoveHostedChannel])
-            case "accept-override" => (id, params.extract[AcceptOverride])
-            case "get-address"     => (id, params.extract[GetAddress])
-            case "send-to-address" => (id, params.extract[SendToAddress])
-            case "open-nc"         => (id, params.extract[OpenNormalChannel])
-            case "close-nc"        => (id, params.extract[CloseNormalChannel])
-            case _                 => (id, params.extract[UnknownCommand])
+          method match {
+            case "ping"       => (id, params.convertTo[Ping])
+            case "get-info"   => (id, params.convertTo[GetInfo])
+            case "request-hc" => (id, params.convertTo[RequestHostedChannel])
+            case "create-invoice" => (id, params.convertTo[CreateInvoice])
+            case "pay-invoice"    => (id, params.convertTo[PayInvoice])
+            case "check-payment"  => (id, params.convertTo[CheckPayment])
+            case "list-payments"  => (id, params.convertTo[ListPayments])
+            case "remove-hc"      => (id, params.convertTo[RemoveHostedChannel])
+            case "accept-override" => (id, params.convertTo[AcceptOverride])
+            case "get-address"     => (id, params.convertTo[GetAddress])
+            case "send-to-address" => (id, params.convertTo[SendToAddress])
+            case "open-nc"         => (id, params.convertTo[OpenNormalChannel])
+            case "close-nc"        => (id, params.convertTo[CloseNormalChannel])
+            case _                 => (id, UnknownCommand(method))
           }
         } catch {
-          case _: Throwable => {
+          case exc
+              if exc.isInstanceOf[spray.json.JsonParser.ParsingException] || exc
+                .isInstanceOf[java.lang.ClassCastException] => {
             val spl = input.trim().split(" ")
             val method = spl(0)
             val tail = spl.tail.toIndexedSeq
 
-            val res = method match {
+            (method match {
               case "ping"           => CaseApp.parse[Ping](tail)
               case "get-info"       => CaseApp.parse[GetInfo](tail)
               case "request-hc"     => CaseApp.parse[RequestHostedChannel](tail)
@@ -95,20 +98,22 @@ object Handler {
               case "close-nc"        => CaseApp.parse[CloseNormalChannel](tail)
               case "accept-override" => CaseApp.parse[AcceptOverride](tail)
               case _ => Right(UnknownCommand(method), Seq.empty[String])
+            }) match {
+              case Left(err)          => ("", ShowError(err.message))
+              case Right((params, _)) => ("", params)
             }
-            res match {
-              case Left(err)       => ("", ShowError(err))
-              case Right((cmd, _)) => ("", cmd)
-            }
+          }
+          case err: Throwable => {
+            ("", ShowError(s"failed to parse: ${err.toString()}"))
           }
         }
 
       implicit val id = command._1
       command._2 match {
         case params: ShowError =>
-          topic.publish1(JSONRPCError(id, params.err.message)) >> IO.unit
-        case _: Ping                      => Commands.ping()
-        case _: GetInfo                   => Commands.getInfo()
+          topic.publish1(JSONRPCError(id, params.err)) >> IO.unit
+        case params: Ping                 => Commands.ping(params)
+        case params: GetInfo              => Commands.getInfo(params)
         case params: RequestHostedChannel => Commands.requestHC(params)
         case params: CreateInvoice        => Commands.createInvoice(params)
         case params: PayInvoice           => Commands.payInvoice(params)
@@ -116,7 +121,7 @@ object Handler {
         case params: ListPayments         => Commands.listPayments(params)
         case params: RemoveHostedChannel  => Commands.removeHC(params)
         case params: AcceptOverride       => Commands.acceptOverride(params)
-        case _: GetAddress                => Commands.getAddress()
+        case params: GetAddress           => Commands.getAddress(params)
         case params: SendToAddress        => Commands.sendToAddress(params)
         case params: OpenNormalChannel    => Commands.openNC(params)
         case params: CloseNormalChannel   => Commands.closeNC(params)
@@ -127,4 +132,33 @@ object Handler {
       }
     }
   }
+}
+
+object SprayConverters extends DefaultJsonProtocol {
+  implicit val convertPing: JsonFormat[Ping] =
+    jsonFormat0(Ping.apply)
+  implicit val convertGetInfo: JsonFormat[GetInfo] =
+    jsonFormat0(GetInfo.apply)
+  implicit val convertRequestHostedChannel: JsonFormat[RequestHostedChannel] =
+    jsonFormat3(RequestHostedChannel.apply)
+  implicit val convertCreateInvoice: JsonFormat[CreateInvoice] =
+    jsonFormat5(CreateInvoice.apply)
+  implicit val convertPayInvoice: JsonFormat[PayInvoice] =
+    jsonFormat2(PayInvoice.apply)
+  implicit val convertCheckPayment: JsonFormat[CheckPayment] =
+    jsonFormat1(CheckPayment.apply)
+  implicit val convertListPayments: JsonFormat[ListPayments] =
+    jsonFormat1(ListPayments.apply)
+  implicit val convertRemoveHostedChannel: JsonFormat[RemoveHostedChannel] =
+    jsonFormat1(RemoveHostedChannel.apply)
+  implicit val convertGetAddress: JsonFormat[GetAddress] =
+    jsonFormat0(GetAddress.apply)
+  implicit val convertSendToAddress: JsonFormat[SendToAddress] =
+    jsonFormat2(SendToAddress.apply)
+  implicit val convertOpenNormalChannel: JsonFormat[OpenNormalChannel] =
+    jsonFormat4(OpenNormalChannel.apply)
+  implicit val convertCloseNormalChannel: JsonFormat[CloseNormalChannel] =
+    jsonFormat1(CloseNormalChannel.apply)
+  implicit val convertAcceptOverride: JsonFormat[AcceptOverride] =
+    jsonFormat1(AcceptOverride.apply)
 }

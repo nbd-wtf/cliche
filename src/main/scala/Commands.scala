@@ -66,10 +66,13 @@ case class JSONRPCNotification(method: String, params: JValue)
     extends JSONRPCMessage
 
 object Commands {
-  def ping()(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] =
+  def ping(params: Ping)(implicit
+      id: String,
+      topic: Topic[IO, JSONRPCMessage]
+  ): IO[Unit] =
     topic.publish1(JSONRPCResponse(id, ("ping" -> "pong"))) >> IO.unit
 
-  def getInfo()(implicit
+  def getInfo(params: GetInfo)(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
   ): IO[Unit] = {
@@ -468,7 +471,7 @@ object Commands {
     }
   }
 
-  def getAddress()(implicit
+  def getAddress(params: GetAddress)(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
   ): IO[Unit] = {
