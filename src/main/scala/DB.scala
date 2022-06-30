@@ -14,13 +14,8 @@ import immortan.sqlite.{
   SQLiteLog,
   SQLiteNetwork,
   SQLitePayment,
-  SQLiteTx
-}
-import com.btcontract.wallet.sqlite.{
-  DBInterfaceSQLiteAndroidEssential,
-  DBInterfaceSQLiteAndroidGraph,
-  DBInterfaceSQLiteAndroidMisc,
-  SQLiteDataExtended
+  SQLiteTx,
+  SQLiteData
 }
 import utils.SQLiteUtils
 
@@ -31,23 +26,19 @@ object DB {
     WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
   val sqlitedb = SQLiteUtils.getConnection(dbname, Config.datadir)
   val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
-  val miscInterface = new DBInterfaceSQLiteAndroidMisc(sqlitedb)
   var txDataBag: SQLiteTx = null
   var lnUrlPayBag: SQLiteLNUrlPay = null
   var chainWalletBag: SQLiteChainWallet = null
-  var extDataBag: SQLiteDataExtended = null
+  var extDataBag: SQLiteData = null
 
   dbinterface txWrap {
     txDataBag = new SQLiteTx(dbinterface)
     lnUrlPayBag = new SQLiteLNUrlPay(dbinterface)
     chainWalletBag = new SQLiteChainWallet(dbinterface)
-    extDataBag = new SQLiteDataExtended(dbinterface)
+    extDataBag = new SQLiteData(dbinterface)
   }
 
   val logBag = new SQLiteLog(dbinterface)
-
-  val essentialInterface = new DBInterfaceSQLiteAndroidEssential(sqlitedb)
-  val graphInterface = new DBInterfaceSQLiteAndroidGraph(sqlitedb)
 
   val normalBag = new SQLiteNetwork(
     dbinterface,
