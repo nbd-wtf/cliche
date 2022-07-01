@@ -15,7 +15,8 @@ import immortan.sqlite.{
   SQLiteNetwork,
   SQLitePayment,
   SQLiteTx,
-  SQLiteData
+  SQLiteData,
+  DBInit
 }
 import utils.SQLiteUtils
 
@@ -25,6 +26,10 @@ object DB {
   val dbname: String =
     WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
   val sqlitedb = SQLiteUtils.getConnection(dbname, Config.datadir)
+
+  // replace this with something that does migrations properly in the future
+  DBInit.createTables(sqlitedb)
+
   val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
   var txDataBag: SQLiteTx = null
   var lnUrlPayBag: SQLiteLNUrlPay = null
