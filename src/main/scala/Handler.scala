@@ -14,6 +14,7 @@ case class Ping() extends Command
 case class GetInfo() extends Command
 case class RequestHostedChannel(pubkey: String, host: String, port: Int)
     extends Command
+case class RemoveHostedChannel(channelId: String) extends Command
 case class CreateInvoice(
     description: Option[String],
     description_hash: Option[String],
@@ -24,7 +25,6 @@ case class CreateInvoice(
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
 case class CheckPayment(hash: String) extends Command
 case class ListPayments(count: Option[Int]) extends Command
-case class RemoveHostedChannel(id: String) extends Command
 case class GetAddress() extends Command
 case class SendToAddress(address: String, satoshi: Option[Long]) extends Command
 case class OpenNormalChannel(
@@ -115,11 +115,11 @@ object Handler {
         case params: Ping                 => Commands.ping(params)
         case params: GetInfo              => Commands.getInfo(params)
         case params: RequestHostedChannel => Commands.requestHC(params)
+        case params: RemoveHostedChannel  => Commands.removeHC(params)
         case params: CreateInvoice        => Commands.createInvoice(params)
         case params: PayInvoice           => Commands.payInvoice(params)
         case params: CheckPayment         => Commands.checkPayment(params)
         case params: ListPayments         => Commands.listPayments(params)
-        case params: RemoveHostedChannel  => Commands.removeHC(params)
         case params: AcceptOverride       => Commands.acceptOverride(params)
         case params: GetAddress           => Commands.getAddress(params)
         case params: SendToAddress        => Commands.sendToAddress(params)
@@ -141,6 +141,8 @@ object SprayConverters extends DefaultJsonProtocol {
     jsonFormat0(GetInfo.apply)
   implicit val convertRequestHostedChannel: JsonFormat[RequestHostedChannel] =
     jsonFormat3(RequestHostedChannel.apply)
+  implicit val convertRemoveHostedChannel: JsonFormat[RemoveHostedChannel] =
+    jsonFormat1(RemoveHostedChannel.apply)
   implicit val convertCreateInvoice: JsonFormat[CreateInvoice] =
     jsonFormat5(CreateInvoice.apply)
   implicit val convertPayInvoice: JsonFormat[PayInvoice] =
@@ -149,8 +151,6 @@ object SprayConverters extends DefaultJsonProtocol {
     jsonFormat1(CheckPayment.apply)
   implicit val convertListPayments: JsonFormat[ListPayments] =
     jsonFormat1(ListPayments.apply)
-  implicit val convertRemoveHostedChannel: JsonFormat[RemoveHostedChannel] =
-    jsonFormat1(RemoveHostedChannel.apply)
   implicit val convertGetAddress: JsonFormat[GetAddress] =
     jsonFormat0(GetAddress.apply)
   implicit val convertSendToAddress: JsonFormat[SendToAddress] =

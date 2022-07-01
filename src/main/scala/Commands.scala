@@ -223,6 +223,35 @@ object Commands {
     }) >> IO.unit
   }
 
+  def removeHC(
+      params: RemoveHostedChannel
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
+    val maybeCommits = for {
+      bytes <- ByteVector.fromHex(params.channelId)
+      channelId <- Try(ByteVector32(bytes)).toOption
+      chan <- LNParams.cm.all.get(channelId)
+      chanAndCommits <- Channel.chanAndCommitsOpt(chan)
+      commits = chanAndCommits.commits
+    } yield commits
+
+    maybeCommits match {
+      case Some(hc) => {
+        LNParams.cm.chanBag.delete(hc.channelId)
+        LNParams.cm.all -= hc.channelId
+        ChannelMaster.next(ChannelMaster.stateUpdateStream)
+        CommsTower.disconnectNative(hc.remoteInfo)
+        topic.publish1(JSONRPCResponse(id, ("closed" -> true))) >> IO.unit
+      }
+      case None =>
+        topic.publish1(
+          JSONRPCError(
+            id,
+            s"invalid or unknown channel id ${params.id}"
+          )
+        ) >> IO.unit
+    }
+  }
+
   def createInvoice(
       params: CreateInvoice
   )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
@@ -439,35 +468,6 @@ object Commands {
     ) >> IO.unit
   }
 
-  def removeHC(
-      params: RemoveHostedChannel
-  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
-    val maybeCommits = for {
-      bytes <- ByteVector.fromHex(params.id)
-      channelId <- Try(ByteVector32(bytes)).toOption
-      chan <- LNParams.cm.all.get(channelId)
-      chanAndCommits <- Channel.chanAndCommitsOpt(chan)
-      commits = chanAndCommits.commits
-    } yield commits
-
-    maybeCommits match {
-      case Some(hc) => {
-        LNParams.cm.chanBag.delete(hc.channelId)
-        LNParams.cm.all -= hc.channelId
-        ChannelMaster.next(ChannelMaster.stateUpdateStream)
-        CommsTower.disconnectNative(hc.remoteInfo)
-        topic.publish1(JSONRPCResponse(id, ("closed" -> true))) >> IO.unit
-      }
-      case None =>
-        topic.publish1(
-          JSONRPCError(
-            id,
-            s"invalid or unknown channel id ${params.id}"
-          )
-        ) >> IO.unit
-    }
-  }
-
   def getAddress(params: GetAddress)(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
@@ -553,8 +553,11 @@ object Commands {
       case Some(hc: HostedCommits) =>
         // @formatter:off
         ("hosted_channel" ->
-          (("override_proposal" -> hc.overrideProposal.map(_.localBalanceMsat.toLong)) ~~
-           ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
+          (("override_proposal" ->
+            ("their_balance" -> hc.overrideProposal.map(_.localBalanceMsat.toLong)) ~~
+            ("our_balance" -> hc.overrideProposal.map(_.remoteBalanceMsat.toLong))
+          ) ~~
+          ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
         )
         // @formatter:on
       case Some(nc: NormalCommits) => ("normal_channel" -> "work in progress")
