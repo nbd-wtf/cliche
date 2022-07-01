@@ -648,7 +648,9 @@ object Commands {
       fulfill: RemoteFulfill
   ): JSONRPCNotification = {
     val msatoshi =
-      data.inFlightParts.map(_.cmd.firstAmount.toLong).fold[Long](0)(_ + _)
+      data.inFlightParts
+        .map(_.cmd.firstAmount.toLong)
+        .fold[Long](0)(_ + _) - data.usedFee.toLong
 
     JSONRPCNotification(
       "payment_succeeded",
