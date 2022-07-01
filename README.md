@@ -31,7 +31,7 @@ This is an example session with some commands called and asynchronous events bei
 # instantiating channel master
 # instantiating electrum actors
 # loading onchain wallets
-# start electrum, fee rate, fiat rate listeners
+# start electrum, fee rate listener
 # is operational: true
 # listening for outgoing payments
 # listening for incoming payments
@@ -62,9 +62,6 @@ get-info
       "hosted":1
     },
     "outgoing_payments":[],
-    "fiat_rates":{
-      "usd":46571.969
-    },
     "fee_rates":{
       "1":2916,
       "10":1162,

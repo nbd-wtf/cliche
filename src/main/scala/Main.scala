@@ -51,9 +51,6 @@ import immortan.utils.{
   FeeRates,
   FeeRatesInfo,
   FeeRatesListener,
-  FiatRates,
-  FiatRatesInfo,
-  FiatRatesListener,
   WalletEventsCatcher,
   WalletEventsListener
 }
@@ -108,7 +105,6 @@ object Main extends IOApp.Simple {
 
     DB.extDataBag.db txWrap {
       LNParams.feeRates = new FeeRates(DB.extDataBag)
-      LNParams.fiatRates = new FiatRates(DB.extDataBag)
     }
 
     println("# setting up pathfinder")
@@ -208,11 +204,6 @@ object Main extends IOApp.Simple {
       }
     }
 
-    LNParams.fiatRates.listeners += new FiatRatesListener {
-      def onFiatRates(newRatesInfo: FiatRatesInfo): Unit =
-        DB.extDataBag.putFiatRatesInfo(newRatesInfo)
-    }
-
     // guaranteed to fire (and update chainWallets) first
     LNParams.chainWallets.catcher.add(new WalletEventsListener {
       override def onChainTipKnown(blockCountEvent: CurrentBlockCount): Unit =
@@ -285,7 +276,7 @@ object Main extends IOApp.Simple {
             description,
             isIncoming,
             balanceSnap = totalBalance,
-            LNParams.fiatRates.info.rates,
+            Map.empty,
             txEvent.stamp
           )
           DB.txDataBag.addSearchableTransaction(
@@ -336,11 +327,11 @@ object Main extends IOApp.Simple {
     // this inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers()
 
-    println("# start electrum, fee rate, fiat rate listeners")
+    println("# start electrum, fee rate listener")
     LNParams.connectionProvider doWhenReady {
       pool.initConnect()
 
-      // only schedule periodic resync if Lightning channels are being present
+      // only schedule periodic resync if Lightning channels are present
       if (LNParams.cm.all.nonEmpty) pf process PathFinder.CMDStartPeriodicResync
 
       val feeratePeriodHours = 6
@@ -360,24 +351,6 @@ object Main extends IOApp.Simple {
         feeratePeriodHours * 3600 * 1000L
       )
       feerateObs.foreach(LNParams.feeRates.updateInfo, none)
-
-      val fiatPeriodSecs = 60 * 30
-      val fiatRetry = Rx.retry(
-        Rx.ioQueue.map(_ => LNParams.fiatRates.reloadData),
-        Rx.incSec,
-        3 to 18 by 3
-      )
-      val fiatRepeat = Rx.repeat(
-        fiatRetry,
-        Rx.incSec,
-        fiatPeriodSecs to Int.MaxValue by fiatPeriodSecs
-      )
-      val fiatObs = Rx.initDelay(
-        fiatRepeat,
-        LNParams.fiatRates.info.stamp,
-        fiatPeriodSecs * 1000L
-      )
-      fiatObs.foreach(LNParams.fiatRates.updateInfo, none)
     }
     println(s"# is operational: ${LNParams.isOperational}")
   }

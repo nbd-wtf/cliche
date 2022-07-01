@@ -112,9 +112,6 @@ object Commands {
                ))
             }
           ) ~~
-          ("fiat_rates" -> LNParams.fiatRates.info.rates.filter {
-            case (currency: String, _) => currency == "usd"
-          }) ~~
           ("fee_rates" ->
             (("1" -> LNParams.feeRates.info.smoothed.feePerBlock(1).toLong) ~~
              ("10" -> LNParams.feeRates.info.smoothed.feePerBlock(10).toLong) ~~
@@ -378,7 +375,7 @@ object Commands {
           action = None,
           amount,
           MilliSatoshi(0L),
-          LNParams.fiatRates.info.rates,
+          Map.empty,
           MilliSatoshi(0L),
           System.currentTimeMillis
         )
