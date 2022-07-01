@@ -99,9 +99,7 @@ object Main extends IOApp.Simple {
       override val maxNodesToSyncFrom = 3
     }
 
-    val secret = WalletSecret(Config.seed)
-    DB.extDataBag.putSecret(secret)
-    LNParams.secret = secret
+    LNParams.secret = WalletSecret(Config.seed)
 
     DB.extDataBag.db txWrap {
       LNParams.feeRates = new FeeRates(DB.extDataBag)
