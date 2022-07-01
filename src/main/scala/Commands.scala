@@ -164,21 +164,21 @@ object Commands {
                 LNParams.cm
               ) {
                 def onException: Unit = {
-                  cancel()
                   dispatcher.unsafeRunAndForget(
                     topic.publish1(JSONRPCError(id, "exception"))
                   )
                   dispatcher.unsafeRunAndForget(blocker.release)
+                  cancel()
                 }
 
                 // stop automatic HC opening attempts on getting any kind of local/remote error,
                 // this won't be triggered on disconnect
                 def onFailure(reason: Throwable) = {
-                  cancel()
                   dispatcher.unsafeRunAndForget(
                     topic.publish1(JSONRPCError(id, reason.toString()))
                   )
                   dispatcher.unsafeRunAndForget(blocker.release)
+                  cancel()
                 }
 
                 def onEstablished(

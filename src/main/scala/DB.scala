@@ -62,5 +62,4 @@ object DB {
         super.put(data)
       }
     }
-
 }
