@@ -19,6 +19,7 @@ import immortan.sqlite.{
   DBInit
 }
 import utils.SQLiteUtils
+import fr.acinq.bitcoin.ByteVector32
 
 object DB {
   println("# setting up database")
@@ -57,7 +58,12 @@ object DB {
     HostedChannelAnnouncementTable,
     HostedExcludedChannelTable
   )
-  val payBag = new SQLitePayment(extDataBag.db, preimageDb = dbinterface)
+  val payBag = new SQLitePayment(extDataBag.db, preimageDb = dbinterface) {
+    override def addSearchablePayment(
+        search: String,
+        paymentHash: ByteVector32
+    ): Unit = {}
+  }
 
   val chanBag =
     new SQLiteChannel(dbinterface, channelTxFeesDb = extDataBag.db) {
