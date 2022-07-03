@@ -376,6 +376,11 @@ object Commands {
         topic.publish1(JSONRPCError(id, "missing amount"))
       case Some(prExt) if prExt.pr.paymentSecret == None =>
         topic.publish1(JSONRPCError(id, "missing payment secret"))
+      case Some(prExt)
+          if LNParams.cm.checkIfSendable(
+            prExt.pr.paymentHash
+          ) != PaymentInfo.Sendable =>
+        topic.publish1(JSONRPCError(id, "payment already sent or in flight"))
       case Some(prExt) => {
         val amount =
           params.msatoshi
