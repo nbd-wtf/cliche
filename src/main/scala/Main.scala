@@ -322,6 +322,9 @@ object Main extends IOApp.Simple {
     // get channels and still active FSMs up and running
     LNParams.cm.all = Channel.load(listeners = Set(LNParams.cm), DB.chanBag)
 
+    // clear up pending payments that were never sent
+    LNParams.cm.cleanupUntriedPending()
+
     // this inital notification will create all in/routed/out FSMs
     LNParams.cm.notifyResolvers()
 
