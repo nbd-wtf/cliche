@@ -377,13 +377,12 @@ object Main extends IOApp.Simple {
                   topic.publish1(Commands.onPaymentFailed(data)) >> IO.unit
                 )
 
-              override def gotFirstPreimage(
-                  data: OutgoingPaymentSenderData,
-                  fulfill: RemoteFulfill
+              override def wholePaymentSucceeded(
+                  data: OutgoingPaymentSenderData
               ): Unit =
                 dispatcher.unsafeRunAndForget(
                   topic.publish1(
-                    Commands.onPaymentSucceeded(data, fulfill)
+                    Commands.onPaymentSucceeded(data)
                   ) >> IO.unit
                 )
             }

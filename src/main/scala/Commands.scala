@@ -649,8 +649,7 @@ object Commands {
     )
 
   def onPaymentSucceeded(
-      data: OutgoingPaymentSenderData,
-      fulfill: RemoteFulfill
+      data: OutgoingPaymentSenderData
   ): JSONRPCNotification = {
     val msatoshi =
       data.inFlightParts
@@ -664,7 +663,7 @@ object Commands {
         ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
         ("fee_msatoshi" -> data.usedFee.toLong) ~~
         ("msatoshi" -> msatoshi) ~~
-        ("preimage" -> fulfill.theirPreimage.toHex) ~~
+        ("preimage" -> data.preimage.get.toHex) ~~
         ("routes" -> data.inFlightParts.map(_.route.asString)) ~~
         ("parts" -> data.parts.size)
         // @formatter:on
