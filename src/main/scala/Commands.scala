@@ -15,7 +15,12 @@ import fr.acinq.eclair.payment.{Bolt11Invoice}
 import fr.acinq.eclair.transactions.RemoteFulfill
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
 import fr.acinq.bitcoin.ByteVector32
-import immortan.fsm.{HCOpenHandler, OutgoingPaymentSenderData, IncomingRevealed}
+import immortan.fsm.{
+  HCOpenHandler,
+  OutgoingPaymentListener,
+  OutgoingPaymentSenderData,
+  IncomingRevealed
+}
 import immortan.{
   Channel,
   ChannelHosted,
@@ -351,7 +356,10 @@ object Commands {
     }) >> IO.unit
   }
 
-  def payInvoice(params: PayInvoice)(implicit
+  def payInvoice(
+      params: PayInvoice,
+      extraListeners: Set[OutgoingPaymentListener] = Set.empty
+  )(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
   ): IO[Unit] = {
@@ -400,7 +408,7 @@ object Commands {
           System.currentTimeMillis
         )
 
-        LNParams.cm.localSend(cmd)
+        LNParams.cm.localSend(cmd, extraListeners)
 
         topic.publish1(
           JSONRPCResponse(
@@ -495,8 +503,34 @@ object Commands {
                                 PayInvoice(
                                   invoice = lnurlpayfinal.pr,
                                   msatoshi = None
-                                )
-                              )("", dummyTopic) >> blocker.release
+                                ),
+                                Set(new OutgoingPaymentListener {
+                                  override def gotFirstPreimage(
+                                      data: OutgoingPaymentSenderData,
+                                      fulfill: RemoteFulfill
+                                  ): Unit =
+                                    dispatcher.unsafeRunAndForget(
+                                      topic.publish1(
+                                        JSONRPCNotification(
+                                          "lnurlpay_success",
+                                          (
+                                            ("success_action" -> lnurlpayfinal.successAction
+                                              .map(
+                                                _.printable(
+                                                  fulfill.theirPreimage
+                                                )
+                                              ))
+                                          )
+                                        )
+                                      ) >> blocker.release
+                                    )
+
+                                  override def wholePaymentFailed(
+                                      data: OutgoingPaymentSenderData
+                                  ): Unit = dispatcher
+                                    .unsafeRunAndForget(blocker.release)
+                                })
+                              )(id, dummyTopic)
                             )
                           },
                           onBadResponse
