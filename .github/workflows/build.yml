@@ -40,6 +40,7 @@ jobs:
         with:
           files: cliche.jar
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          release-tag: ${{ github.ref }}
 
   build-linux-native-image:
     runs-on: ubuntu-latest
@@ -63,6 +64,7 @@ jobs:
         with:
           files: cliche-linux.bin.tar.gz
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          release-tag: ${{ github.ref }}
 
   build-mac-native-image:
     runs-on: macos-latest
@@ -87,3 +89,4 @@ jobs:
         with:
           files: cliche-macos.bin.tar.gz
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          release-tag: ${{ github.ref }}
