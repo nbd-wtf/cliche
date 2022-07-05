@@ -22,7 +22,7 @@ class ServerApp()(
       case POST -> Root => Ok("~")
       case GET -> Root => {
         def process(input: WebSocketFrame): IO[Unit] = input match {
-          case Text(msg, _) => Handler.handle(msg)
+          case Text(msg, _) => Handler.handle(msg).start >> IO.unit
           case other => IO.println(s"# unexpected websocket message: $other")
         }
 

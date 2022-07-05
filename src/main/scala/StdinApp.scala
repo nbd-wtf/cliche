@@ -5,8 +5,9 @@ class StdinApp()(
     implicit F: Async[IO],
     implicit val topic: Topic[IO, JSONRPCMessage]
 ) {
-  def run(): IO[Unit] = {
-    val loop = IO.readLine.map(_.trim()).flatMap(Handler.handle(_))
-    loop.foreverM
-  }
+  def run(): IO[Unit] =
+    IO.readLine
+      .map(_.trim())
+      .flatMap(Handler.handle(_).start >> IO.unit)
+      .foreverM
 }
