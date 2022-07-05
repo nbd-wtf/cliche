@@ -23,6 +23,13 @@ case class CreateInvoice(
     label: Option[String]
 ) extends Command
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
+case class PayLnurl(
+    lnurl: String,
+    msatoshi: Long,
+    comment: Option[String],
+    name: Option[String],
+    attachAuth: Boolean = true
+) extends Command
 case class CheckPayment(hash: String) extends Command
 case class ListPayments(count: Option[Int]) extends Command
 case class GetAddress() extends Command
@@ -65,6 +72,7 @@ object Handler {
             case "request-hc" => (id, params.convertTo[RequestHostedChannel])
             case "create-invoice" => (id, params.convertTo[CreateInvoice])
             case "pay-invoice"    => (id, params.convertTo[PayInvoice])
+            case "pay-lnurl"      => (id, params.convertTo[PayLnurl])
             case "check-payment"  => (id, params.convertTo[CheckPayment])
             case "list-payments"  => (id, params.convertTo[ListPayments])
             case "remove-hc"      => (id, params.convertTo[RemoveHostedChannel])
@@ -89,6 +97,7 @@ object Handler {
               case "request-hc"     => CaseApp.parse[RequestHostedChannel](tail)
               case "create-invoice" => CaseApp.parse[CreateInvoice](tail)
               case "pay-invoice"    => CaseApp.parse[PayInvoice](tail)
+              case "pay-lnurl"      => CaseApp.parse[PayLnurl](tail)
               case "check-payment"  => CaseApp.parse[CheckPayment](tail)
               case "list-payments"  => CaseApp.parse[ListPayments](tail)
               case "remove-hc"      => CaseApp.parse[RemoveHostedChannel](tail)
@@ -118,6 +127,7 @@ object Handler {
         case params: RemoveHostedChannel  => Commands.removeHC(params)
         case params: CreateInvoice        => Commands.createInvoice(params)
         case params: PayInvoice           => Commands.payInvoice(params)
+        case params: PayLnurl             => Commands.payLnurl(params)
         case params: CheckPayment         => Commands.checkPayment(params)
         case params: ListPayments         => Commands.listPayments(params)
         case params: AcceptOverride       => Commands.acceptOverride(params)
@@ -147,6 +157,8 @@ object SprayConverters extends DefaultJsonProtocol {
     jsonFormat5(CreateInvoice.apply)
   implicit val convertPayInvoice: JsonFormat[PayInvoice] =
     jsonFormat2(PayInvoice.apply)
+  implicit val convertPayLnurl: JsonFormat[PayLnurl] =
+    jsonFormat5(PayLnurl.apply)
   implicit val convertCheckPayment: JsonFormat[CheckPayment] =
     jsonFormat1(CheckPayment.apply)
   implicit val convertListPayments: JsonFormat[ListPayments] =

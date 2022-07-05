@@ -30,9 +30,10 @@ import immortan.{
   PaymentInfo,
   CommsTower
 }
-import immortan.utils.{PaymentRequestExt, BitcoinUri}
+import immortan.utils.{PayRequest, PaymentRequestExt, BitcoinUri, LNUrl}
 import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
+import immortan.utils.InputParser
 
 sealed trait JSONRPCMessage {
   def render(forceCompact: Boolean = false): String = {
@@ -130,7 +131,7 @@ object Commands {
     val localParams =
       LNParams.makeChannelParams(isFunder = false, LNParams.minChanDustLimit)
 
-    ((
+    (
       ByteVector.fromHex(params.pubkey),
       Try(
         RemoteNodeInfo(
@@ -141,86 +142,71 @@ object Commands {
       ).toEither
     ) match {
       case (Some(pubkey), _) if pubkey.length != 33 =>
-        topic.publish1(JSONRPCError(id, "pubkey must be 33 bytes hex"))
-      case (None, _) => topic.publish1(JSONRPCError(id, ("invalid pubkey hex")))
+        topic.publish1(
+          JSONRPCError(id, "pubkey must be 33 bytes hex")
+        ) >> IO.unit
+      case (None, _) =>
+        topic.publish1(JSONRPCError(id, ("invalid pubkey hex"))) >> IO.unit
       case (_, Left(_)) =>
-        topic.publish1(JSONRPCError(id, ("invalid node address or port")))
+        topic.publish1(
+          JSONRPCError(id, ("invalid node address or port"))
+        ) >> IO.unit
       case (Some(pubkey), Right(target)) =>
-        Dispatcher[IO].use { dispatcher =>
-          for {
-            blocker <- CountDownLatch[IO](1)
-            _ <- IO.delay {
-              val cancel = dispatcher.unsafeRunCancelable(
-                IO.sleep(FiniteDuration(5, "seconds")) >>
-                  topic.publish1(
-                    JSONRPCError(id, "taking too long")
-                  ) >> blocker.release
-              )
+        for {
+          response <- IO.async_[JSONRPCMessage] { cb =>
+            new HCOpenHandler(
+              target,
+              randomBytes32,
+              localParams.defaultFinalScriptPubKey,
+              LNParams.cm
+            ) {
+              def onException: Unit = {
+                cb(Right(JSONRPCError(id, "exception")))
+              }
 
-              new HCOpenHandler(
-                target,
-                randomBytes32,
-                localParams.defaultFinalScriptPubKey,
-                LNParams.cm
-              ) {
-                def onException: Unit = {
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(JSONRPCError(id, "exception"))
-                  )
-                  dispatcher.unsafeRunAndForget(blocker.release)
-                  cancel()
-                }
+              // stop automatic HC opening attempts on getting any kind of local/remote error,
+              // this won't be triggered on disconnect
+              def onFailure(reason: Throwable) = {
+                cb(Right(JSONRPCError(id, reason.toString())))
+              }
 
-                // stop automatic HC opening attempts on getting any kind of local/remote error,
-                // this won't be triggered on disconnect
-                def onFailure(reason: Throwable) = {
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(JSONRPCError(id, reason.toString()))
-                  )
-                  dispatcher.unsafeRunAndForget(blocker.release)
-                  cancel()
-                }
-
-                def onEstablished(
-                    cs: Commitments,
-                    freshChannel: ChannelHosted
-                ) = {
-                  cancel()
-                  dispatcher.unsafeRunAndForget(
-                    topic.publish1(
-                      JSONRPCResponse(
-                        id,
-                        (
-                          // @formatter:off
-                          ("channel_id" -> cs.channelId.toHex) ~~
-                          ("peer" ->
-                            (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
-                             ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
-                             ("addr" -> cs.remoteInfo.address.toString())
-                          )
-                          // @formatter:on
+              def onEstablished(
+                  cs: Commitments,
+                  freshChannel: ChannelHosted
+              ) = {
+                cb(
+                  Right(
+                    JSONRPCResponse(
+                      id,
+                      (
+                        // @formatter:off
+                        ("channel_id" -> cs.channelId.toHex) ~~
+                        ("peer" ->
+                          (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
+                           ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
+                           ("addr" -> cs.remoteInfo.address.toString())
                         )
+                        // @formatter:on
                       )
                     )
                   )
-                  dispatcher.unsafeRunAndForget(blocker.release)
+                )
 
-                  LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
-                  LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
+                LNParams.cm.pf process PathFinder.CMDStartPeriodicResync
+                LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
 
-                  // this removes all previous channel listeners
-                  freshChannel.listeners = Set(LNParams.cm)
-                  LNParams.cm.initConnect()
+                // this removes all previous channel listeners
+                freshChannel.listeners = Set(LNParams.cm)
+                LNParams.cm.initConnect()
 
-                  // update view on hub activity and finalize local stuff
-                  ChannelMaster.next(ChannelMaster.statusUpdateStream)
-                }
+                // update view on hub activity and finalize local stuff
+                ChannelMaster.next(ChannelMaster.statusUpdateStream)
               }
             }
-            _ <- blocker.await
-          } yield ()
-        }
-    }) >> IO.unit
+          }
+          _ <- topic.publish1(response)
+        } yield ()
+    }
   }
 
   def removeHC(
@@ -246,7 +232,7 @@ object Commands {
         topic.publish1(
           JSONRPCError(
             id,
-            s"invalid or unknown channel id ${params.id}"
+            s"invalid or unknown channel id ${params.channelId}"
           )
         ) >> IO.unit
     }
@@ -433,6 +419,117 @@ object Commands {
     }) >> IO.unit
   }
 
+  def payLnurl(params: PayLnurl)(implicit
+      id: String,
+      topic: Topic[IO, JSONRPCMessage]
+  ): IO[Unit] = {
+    Dispatcher[IO].use { dispatcher =>
+      for {
+        dummyTopic <- Topic[IO, JSONRPCMessage]
+        blocker <- CountDownLatch[IO](1)
+        _ <- IO.delay {
+          def onBadResponse(err: Throwable): Unit = {
+            try {
+              dispatcher.unsafeRunAndForget(
+                topic.publish1(
+                  JSONRPCError(id, err.toString)
+                ) >> dummyTopic.close >> blocker.release
+              )
+            } catch {
+              case _: Throwable => {}
+            }
+          }
+
+          Try(InputParser.parse(params.lnurl)) match {
+            case Success(lnurl: LNUrl) => {
+              lnurl.level1DataResponse.subscribe(
+                {
+                  case lnurlpay: PayRequest => {
+                    dispatcher.unsafeRunAndForget(
+                      topic.publish1(
+                        JSONRPCNotification(
+                          "lnurlpay_params",
+                          (
+                            // @formatter:off
+                            ("min" -> lnurlpay.minSendable) ~~
+                            ("max" -> lnurlpay.maxSendable) ~~
+                            ("callback" -> lnurlpay.callback) ~~
+                            ("description" -> lnurlpay.meta.textShort) ~~
+                            ("comment" -> lnurlpay.commentAllowed) ~~
+                            ("payerdata" -> lnurlpay.payerData.map(pds =>
+                              (("auth", pds.auth.isDefined) ~~
+                               ("name", pds.name.isDefined) ~~
+                               ("pubkey", pds.pubkey.isDefined))
+                            ))
+                            // @formatter:on
+                          )
+                        )
+                      )
+                    )
+
+                    if (
+                      lnurlpay.maxSendable < params.msatoshi || lnurlpay.minSendable > params.msatoshi
+                    ) {
+                      dispatcher.unsafeRunAndForget(
+                        topic.publish1(
+                          JSONRPCError(
+                            id,
+                            s"amount provided (${params.msatoshi}) is not in the acceptable range ${lnurlpay.minSendable}-${lnurlpay.maxSendable}"
+                          )
+                        ) >> dummyTopic.close >> blocker.release
+                      )
+                    } else {
+                      lnurlpay
+                        .getFinal(
+                          amount = MilliSatoshi(params.msatoshi),
+                          comment = params.comment,
+                          name = params.name,
+                          authKeyHost =
+                            if (params.attachAuth) Some(lnurl.uri.getHost)
+                            else None
+                        )
+                        .subscribe(
+                          { lnurlpayfinal =>
+                            dispatcher.unsafeRunAndForget(
+                              payInvoice(
+                                PayInvoice(
+                                  invoice = lnurlpayfinal.pr,
+                                  msatoshi = None
+                                )
+                              )("", dummyTopic) >> blocker.release
+                            )
+                          },
+                          onBadResponse
+                        )
+                    }
+                  }
+                  case _ => {
+                    dispatcher.unsafeRunAndForget(
+                      topic.publish1(
+                        JSONRPCError(
+                          id,
+                          "got something that isn't a valid lnurl-pay response"
+                        )
+                      ) >> dummyTopic.close >> blocker.release
+                    )
+                  }
+                },
+                onBadResponse
+              )
+            }
+            case _ => {
+              dispatcher.unsafeRunAndForget(
+                topic.publish1(JSONRPCError(id, "invalid lnurl"))
+                  >> dummyTopic.close >> blocker.release
+              )
+            }
+          }
+        }
+        _ <- blocker.await
+      } yield ()
+    }
+  }
+
   def checkPayment(params: CheckPayment)(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
@@ -480,39 +577,32 @@ object Commands {
     implicit val ec: scala.concurrent.ExecutionContext =
       scala.concurrent.ExecutionContext.global
 
-    Dispatcher[IO].use { dispatcher =>
-      for {
-        blocker <- CountDownLatch[IO](1)
-        _ <- IO.delay {
-          LNParams.chainWallets.wallets.head.getReceiveAddresses
-            .onComplete {
-              case Success(resp) => {
-                val address = resp.keys
-                  .take(1)
-                  .map(resp.ewt.textAddress)
-                  .head
+    for {
+      response <- IO.async_[JSONRPCMessage] { cb =>
+        LNParams.chainWallets.wallets.head.getReceiveAddresses
+          .onComplete {
+            case Success(resp) => {
+              val address = resp.keys
+                .take(1)
+                .map(resp.ewt.textAddress)
+                .head
 
-                dispatcher.unsafeRunAndForget(
-                  topic.publish1(
-                    JSONRPCResponse(
-                      id,
-                      ("address" -> address)
-                    )
+              cb(
+                Right(
+                  JSONRPCResponse(
+                    id,
+                    ("address" -> address)
                   )
                 )
-                dispatcher.unsafeRunAndForget(blocker.release)
-              }
-              case Failure(err) => {
-                dispatcher.unsafeRunAndForget(
-                  topic.publish1(JSONRPCError(id, err.toString()))
-                )
-                dispatcher.unsafeRunAndForget(blocker.release)
-              }
+              )
             }
-        }
-        _ <- blocker.await
-      } yield ()
-    }
+            case Failure(err) => {
+              cb(Right(JSONRPCError(id, err.toString())))
+            }
+          }
+      }
+      _ <- topic.publish1(response)
+    } yield ()
   }
 
   def sendToAddress(
@@ -560,7 +650,7 @@ object Commands {
         ("hosted_channel" ->
           (("override_proposal" ->
             ("their_balance" -> hc.overrideProposal.map(_.localBalanceMsat.toLong)) ~~
-            ("our_balance" -> hc.overrideProposal.map(_.remoteBalanceMsat.toLong))
+            ("our_balance" -> hc.overrideProposal.map(op => hc.lastCrossSignedState.initHostedChannel.channelCapacityMsat.toLong - op.localBalanceMsat.toLong))
           ) ~~
           ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
         )
