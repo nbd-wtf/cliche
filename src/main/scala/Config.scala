@@ -54,6 +54,9 @@ object Config {
 
   val compactJSON = c.as[Boolean]("cliche.json.compact")
 
+  val websocketHost = c.as[String]("cliche.websocket.host")
+  val websocketPort = c.as[Int]("cliche.websocket.port")
+
   def print(): Unit = {
     println(s"# loaded configs: network=$network json.compact=$compactJSON")
   }

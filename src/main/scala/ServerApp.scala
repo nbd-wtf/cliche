@@ -38,7 +38,7 @@ class ServerApp()(
 
   def stream: Stream[IO, ExitCode] =
     BlazeServerBuilder[IO]
-      .bindHttp(12000, "127.0.0.1")
+      .bindHttp(Config.websocketPort, Config.websocketHost)
       .withHttpWebSocketApp(routes(_).orNotFound)
       .serve
 }
