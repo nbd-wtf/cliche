@@ -145,18 +145,23 @@ This is intended to be started by a different program and methods to be called b
 
 - `get-info`, params: none
 - `request-hc`, params: `pubkey` (string), `host` (string), `port` (number)
+- `remove-hc`, params: `channel-id` (string)
 - `create-invoice`, params: `msatoshi` (number, optional), `description` (string, optional), `description_hash` (string, optional), `preimage` (string, optional)
 - `pay-invoice`, params: `invoice` (string), `msatoshi` (number, optional)
+- `pay-lnurl`, params: `lnurl` (string, accepts LUD-01, LUD-16 and LUD-17 formats), `msatoshi`, (number, required), `comment` (string, optional, for LUD-12), `name` (string, optional, for LUD-18), `attach-auth` (boolean, defaults to true, for LUD-18)
 - `check-payment` (works for both incoming and outgoing payments), params: `hash` (string)
 - `list-payments`, params: `count` (optional, int)
 - `accept-override`, params: `channel-id` (string)
+- `get-address`, params: none
 
 ### Notifications
 
-- `ready`
-- `payment_succeeded`
-- `payment_failed`
-- `payment_received`
+- `ready` (emitted once when `cliche` is ready to answer commands)
+- `payment_succeeded` (emitted on every outgoing payment success)
+- `payment_failed` (emitted on every outgoing payment complete failure -- no more attempts or pending shards)
+- `payment_received` (emitted on every committed incoming payment)
+- `lnurlpay_params` (emitted upon lnurl-pay params are receiving during a `pay-lnurl` call)
+- `lnurlpay_success` (emitted after a `pay-lnurl` payment is completed, may contain a LUD-09/LUD-10 `successAction`)
 
 ## Building and development
 
