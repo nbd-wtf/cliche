@@ -8,7 +8,7 @@ import com.softwaremill.quicklens.ModifyPimp
 import fs2.concurrent.Topic
 import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
-import fr.acinq.eclair.channel.{Commitments, NormalCommits}
+import fr.acinq.eclair.channel.{Commitments, NormalCommits, DATA_NORMAL}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
@@ -698,6 +698,12 @@ object Commands {
 
     // @formatter:off
     (("id" -> commits.map(_.channelId.toHex)) ~~
+     ("short_channel_id" ->
+       (chan.data match {
+        case d: DATA_NORMAL => Some(d.shortChannelId)
+        case _ => None
+       })
+     ) ~~
      ("peer" ->
        (("pubkey" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
         ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
