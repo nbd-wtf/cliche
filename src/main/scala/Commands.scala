@@ -14,7 +14,7 @@ import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
 import fr.acinq.eclair.transactions.RemoteFulfill
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
-import fr.acinq.bitcoin.ByteVector32
+import fr.acinq.bitcoin.{ByteVector32, Satoshi}
 import immortan.fsm.{
   HCOpenHandler,
   OutgoingPaymentListener,
@@ -663,6 +663,30 @@ object Commands {
         chan.acceptOverride() match {
           case Right(_) =>
             topic.publish1(JSONRPCResponse(id, ("accepted" -> true))) >> IO.unit
+          case Left(err) => topic.publish1(JSONRPCError(id, err)) >> IO.unit
+        }
+      case _ =>
+        topic.publish1(
+          JSONRPCError(
+            id,
+            s"invalid or unknown hosted channel id ${params.channelId}"
+          )
+        ) >> IO.unit
+    }
+  }
+
+  def resizeHC(
+      params: ResizeHostedChannel
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
+    (for {
+      bytes <- ByteVector.fromHex(params.channelId)
+      channelId <- Try(ByteVector32(bytes)).toOption
+      chan <- LNParams.cm.all.get(channelId)
+    } yield chan) match {
+      case Some(chan: ChannelHosted) =>
+        chan.proposeResize(Satoshi(params.satoshiDelta)) match {
+          case Right(_) =>
+            topic.publish1(JSONRPCResponse(id, ("proposed" -> true))) >> IO.unit
           case Left(err) => topic.publish1(JSONRPCError(id, err)) >> IO.unit
         }
       case _ =>
