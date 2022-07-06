@@ -159,6 +159,19 @@ object Commands {
       case (Some(pubkey), Right(target)) =>
         for {
           response <- IO.async_[JSONRPCMessage] { cb =>
+            val t = new java.util.Timer()
+            val task = new java.util.TimerTask {
+              def run() = cb(
+                Right(
+                  JSONRPCError(
+                    id,
+                    "channel establishment is taking too long -- although it may still succeed we'll stop watching"
+                  )
+                )
+              )
+            }
+            t.schedule(task, 5000L)
+
             new HCOpenHandler(
               target,
               randomBytes32,
