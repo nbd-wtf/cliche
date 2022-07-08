@@ -9,7 +9,7 @@ import fs2.concurrent.Topic
 import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
 import fr.acinq.eclair.channel.{Commitments, NormalCommits, DATA_NORMAL}
-import fr.acinq.eclair.{MilliSatoshi, randomBytes32}
+import fr.acinq.eclair.{ShortChannelId, MilliSatoshi, randomBytes32}
 import fr.acinq.eclair.wire.{NodeAddress}
 import fr.acinq.eclair.payment.{Bolt11Invoice}
 import fr.acinq.eclair.transactions.RemoteFulfill
@@ -375,7 +375,7 @@ object Commands {
   )(implicit
       id: String,
       topic: Topic[IO, JSONRPCMessage]
-  ): IO[Unit] = {
+  ): IO[Unit] =
     (Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
       case None => topic.publish1(JSONRPCError(id, "invalid invoice"))
       case Some(prExt)
@@ -428,17 +428,16 @@ object Commands {
             id,
             (
               // @formatter:off
-              ("sent" -> true) ~~
-              ("payee" -> cmd.targetNodeId.toString) ~~
+              ("msatoshi" -> amount.toLong) ~~
               ("fee_reserve" -> cmd.totalFeeReserve.toLong) ~~
-              ("payment_hash" -> cmd.fullTag.paymentHash.toHex)
+              ("payment_hash" -> cmd.fullTag.paymentHash.toHex) ~~
+              ("payee" -> cmd.targetNodeId.toString)
               // @formatter:on
             )
           )
         )
       }
     }) >> IO.unit
-  }
 
   def payLnurl(params: PayLnurl)(implicit
       id: String,
@@ -719,12 +718,10 @@ object Commands {
       case Some(hc: HostedCommits) =>
         // @formatter:off
         ("hosted_channel" ->
-          (("override_proposal" ->
-            ("their_balance" -> hc.overrideProposal.map(_.localBalanceMsat.toLong)) ~~
-            ("our_balance" -> hc.overrideProposal.map(op => hc.lastCrossSignedState.initHostedChannel.channelCapacityMsat.toLong - op.localBalanceMsat.toLong))
-          ) ~~
+          ("override_proposal" -> hc.overrideProposal.map(op =>
+            (("their_balance" -> op.localBalanceMsat.toLong) ~~
+             ("our_balance" -> (hc.lastCrossSignedState.initHostedChannel.channelCapacityMsat.toLong - op.localBalanceMsat.toLong))))) ~~
           ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
-        )
         // @formatter:on
       case Some(nc: NormalCommits) => ("normal_channel" -> "work in progress")
       case None =>
@@ -733,14 +730,15 @@ object Commands {
         ("weird_channel" -> "we don't really know what channel type this is")
     }
 
+    val scid = commits match {
+      case Some(hc: HostedCommits) =>
+        Some(ShortChannelId.asString(hc.shortChannelId))
+      case _ => None
+    }
+
     // @formatter:off
     (("id" -> commits.map(_.channelId.toHex)) ~~
-     ("short_channel_id" ->
-       (chan.data match {
-        case d: DATA_NORMAL => Some(d.shortChannelId)
-        case _ => None
-       })
-     ) ~~
+     ("short_channel_id" -> scid) ~~
      ("peer" ->
        (("pubkey" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
         ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
@@ -809,7 +807,7 @@ object Commands {
         // @formatter:off
         ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
         ("parts" -> data.parts.size) ~~
-        ("routes" -> data. inFlightParts.map(_.route.asString)) ~~
+        ("routes" -> data.inFlightParts.map(_.route.asString)) ~~
         ("failure" -> data.failures.map(_.asString))
         // @formatter:on
       )
@@ -818,21 +816,17 @@ object Commands {
   def onPaymentSucceeded(
       data: OutgoingPaymentSenderData
   ): JSONRPCNotification = {
-    val msatoshi =
-      data.inFlightParts
-        .map(_.cmd.firstAmount.toLong)
-        .fold[Long](0)(_ + _) - data.usedFee.toLong
+    val info =
+      LNParams.cm.payBag.getPaymentInfo(data.cmd.fullTag.paymentHash).get
 
     JSONRPCNotification(
       "payment_succeeded",
       (
         // @formatter:off
-        ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
-        ("fee_msatoshi" -> data.usedFee.toLong) ~~
-        ("msatoshi" -> msatoshi) ~~
-        ("preimage" -> data.preimage.get.toHex) ~~
-        ("routes" -> data.inFlightParts.map(_.route.asString)) ~~
-        ("parts" -> data.parts.size)
+        ("payment_hash" -> info.paymentHash.toHex) ~~
+        ("fee_msatoshi" -> info.fee.toLong) ~~
+        ("msatoshi" -> info.sent.toLong) ~~
+        ("preimage" -> info.preimage.toHex)
         // @formatter:on
       )
     )

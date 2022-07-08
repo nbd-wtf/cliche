@@ -112,7 +112,6 @@ xzhdsmg6qq56utgqqqqqqqqqqqeqqjqurvsq6w7pjse26vyuxta4d9e0w03g2tw3yajks73parppz3dj
     "fee_msatoshi":1,
     "msatoshi":12001,
     "preimage":"0000001124019af4833f82681916f6948e31a4408e53c6427944b4f8dea74670",
-    "parts":1
   }
 }
 ```
