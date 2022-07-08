@@ -1,4 +1,4 @@
-name: Build and Release
+name: build and release and upload assets
 on:
   push:
     tags:
@@ -40,7 +40,7 @@ jobs:
         with:
           files: cliche.jar
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          release-tag: ${{ github.ref }}
+          release-tag: ${{ github.ref_name }}
 
   build-linux-native-image:
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
         with:
           files: cliche-linux.bin.tar.gz
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          release-tag: ${{ github.ref }}
+          release-tag: ${{ github.ref_name }}
 
   build-mac-native-image:
     runs-on: macos-latest
@@ -89,4 +89,4 @@ jobs:
         with:
           files: cliche-macos.bin.tar.gz
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          release-tag: ${{ github.ref }}
+          release-tag: ${{ github.ref_name }}

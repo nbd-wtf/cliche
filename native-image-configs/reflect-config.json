@@ -50,6 +50,11 @@
   "queryAllPublicMethods":true
 },
 {
+  "name":"ResizeHostedChannel",
+  "allDeclaredFields":true,
+  "queryAllPublicMethods":true
+},
+{
   "name":"SendToAddress",
   "allDeclaredFields":true,
   "queryAllPublicMethods":true
