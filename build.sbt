@@ -34,7 +34,10 @@ nativeImageOptions ++= Seq(
 
   s"-H:ConfigurationFileDirectories=${target.value / ".." / "native-image-configs" }",
   "-H:+JNI",
-  "--no-fallback"
+  "--no-fallback",
+
+  "--enable-http",
+  "--enable-https"
 )
 nativeImageAgentOutputDir := target.value / ".." / "native-image-configs"
 
