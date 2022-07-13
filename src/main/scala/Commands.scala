@@ -1,3 +1,4 @@
+import scala.util.chaining._
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
@@ -278,19 +279,23 @@ object Commands {
         )
 
     // get our route hints
-    val hops = Random.shuffle(
-      LNParams.cm.all.values
-        .flatMap(Channel.chanAndCommitsOpt(_))
-        .map(chanAndCommits =>
-          (
-            chanAndCommits.commits.updateOpt,
-            chanAndCommits.commits.remoteInfo.nodeId
-          )
-        )
-        .collect { case Some(usableUpdate) ~ nodeId =>
-          usableUpdate.extraHop(nodeId) :: Nil
-        }
-    )
+    val hops = LNParams.cm.all.values
+      .flatMap(Channel.chanAndCommitsOpt(_))
+      .filter { case ChanAndCommits(chan, _) => !Channel.isErrored(chan) }
+      .pipe(Random.shuffle(_))
+      .toList
+      .sortBy {
+        case ChanAndCommits(c, _) if Channel.isOperationalAndOpen(c) => 0
+        case ChanAndCommits(c, _) if Channel.isOperationalAndSleeping(c) =>
+          1
+        case _ => 2
+      }
+      .sortBy(chanAndCommits =>
+        chanAndCommits.commits.availableForReceive.toLong * -1
+      )
+      .map { case ChanAndCommits(_, m) => (m.updateOpt, m.remoteInfo.nodeId) }
+      .collect { case Some(upd) ~ nodeId => upd.extraHop(nodeId) :: Nil }
+      .take(3)
 
     if (hops.size == 0) {
       return topic.publish1(
@@ -744,7 +749,7 @@ object Commands {
         ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
         ("addr" -> commits.map(_.remoteInfo.address.toString())))
      ) ~~
-     ("balance" -> chan.data.ourBalance.toLong) ~~
+     ("capacity" -> (chan.data.ourBalance.toLong + commits.map(_.availableForReceive.toLong).getOrElse(0L))) ~~
      ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
      ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
      ("status" -> (
