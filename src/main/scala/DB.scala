@@ -1,32 +1,17 @@
+import java.sql.{Connection, DriverManager}
 import fr.acinq.eclair.channel.PersistentChannelData
-import immortan.WalletSecret
-import immortan.sqlite.{
-  DBInterfaceSQLiteGeneral,
-  HostedChannelAnnouncementTable,
-  HostedChannelUpdateTable,
-  HostedExcludedChannelTable,
-  NormalChannelAnnouncementTable,
-  NormalChannelUpdateTable,
-  NormalExcludedChannelTable,
-  SQLiteChainWallet,
-  SQLiteChannel,
-  SQLiteLNUrlPay,
-  SQLiteLog,
-  SQLiteNetwork,
-  SQLitePayment,
-  SQLiteTx,
-  SQLiteData,
-  DBInit
-}
-import utils.SQLiteUtils
 import fr.acinq.bitcoin.ByteVector32
+import immortan.WalletSecret
+import immortan.sqlite._
 
 object DB {
   println("# setting up database")
 
   val dbname: String =
     WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
-  val sqlitedb = SQLiteUtils.getConnection(dbname, Config.datadir)
+  val sqlitedb = DriverManager.getConnection(
+    s"jdbc:sqlite:${Config.datadir}/db-${dbname}.sqlite"
+  )
 
   // replace this with something that does migrations properly in the future
   DBInit.createTables(sqlitedb)
