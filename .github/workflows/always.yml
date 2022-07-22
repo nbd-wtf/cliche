@@ -1,0 +1,28 @@
+name: build every commit including those with immortan snapshot dependencies
+on:
+  - push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: immortan
+          repository: fiatjaf/immortan
+      - run: cd immortan && perl -i -0pe "s/.*sonatype.*\n//g" build.sbt
+      - uses: actions/checkout@v3
+        with:
+          path: cliche
+          repository: fiatjaf/cliche
+      - uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: 'sbt'
+      - run: cd immortan && sbt publishLocal
+      - run: cd cliche && GRAALVM_HOME=$GRAALVM_11_ROOT sbt nativeImage
+      - uses: actions/upload-artifact@v3
+        with:
+          path: cliche/target/native-image/cliche
+          name: cliche-linux.bin
