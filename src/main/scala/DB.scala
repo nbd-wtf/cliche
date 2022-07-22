@@ -5,13 +5,11 @@ import immortan.WalletSecret
 import immortan.sqlite._
 
 object DB {
-  println("# setting up database")
-
   val dbname: String =
     WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
-  val sqlitedb = DriverManager.getConnection(
-    s"jdbc:sqlite:${Config.datadir}/db-${dbname}.sqlite"
-  )
+  val dbpath: String = s"${Config.datadir}/db-${dbname}.sqlite"
+  println(s"# setting up database at $dbpath")
+  val sqlitedb = DriverManager.getConnection(s"jdbc:sqlite:$dbpath")
 
   // replace this with something that does migrations properly in the future
   DBInit.createTables(sqlitedb)
