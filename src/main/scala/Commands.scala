@@ -143,7 +143,7 @@ object Commands {
         RemoteNodeInfo(
           PublicKey(ByteVector.fromValidHex(params.pubkey)),
           NodeAddress.fromParts(host = params.host, port = params.port),
-          "unnamed"
+          name.getOrElse("unnamed")
         )
       ).toEither
     ) match {
@@ -744,6 +744,7 @@ object Commands {
     // @formatter:off
     (("id" -> commits.map(_.channelId.toHex)) ~~
      ("short_channel_id" -> scid) ~~
+     ("label" -> commits.map(_.remoteInfo.alias)) ~~
      ("peer" ->
        (("pubkey" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
         ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
