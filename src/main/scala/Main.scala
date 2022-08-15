@@ -54,7 +54,7 @@ import immortan.utils.{
   WalletEventsCatcher,
   WalletEventsListener
 }
-import immortan.crypto.Tools.{~, none, Any2Some}
+import immortan.crypto.Tools.{~, none}
 
 import utils.RequestsConnectionProvider
 import scala.concurrent.duration.FiniteDuration
@@ -226,7 +226,7 @@ object Main extends IOApp.Simple {
       }
 
       override def onChainMasterSelected(addr: InetSocketAddress): Unit =
-        currentChainNode = addr.asSome
+        currentChainNode = Some(addr)
 
       override def onChainDisconnected(): Unit = currentChainNode = None
 
