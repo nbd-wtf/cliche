@@ -211,7 +211,7 @@ object Commands {
                   )
                 )
 
-                LNParams.cm.pf.startPeriodicResync()
+                LNParams.cm.pf.process(PathFinder.CMDStartPeriodicResync)
                 LNParams.cm.all += Tuple2(cs.channelId, freshChannel)
 
                 // this removes all previous channel listeners

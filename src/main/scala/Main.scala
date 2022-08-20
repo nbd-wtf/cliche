@@ -333,7 +333,8 @@ object Main extends IOApp.Simple {
       pool.initConnect()
 
       // only schedule periodic resync if Lightning channels are present
-      if (LNParams.cm.all.nonEmpty) pf.startPeriodicResync()
+      if (LNParams.cm.all.nonEmpty)
+        pf.process(PathFinder.CMDStartPeriodicResync)
 
       val feeratePeriodHours = 6
       val rateRetry = Rx.retry(
