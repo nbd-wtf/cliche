@@ -127,6 +127,7 @@ The same methods can be called either with this CLI-like format or with JSON-RPC
 For casual usage you'll want the CLI-style commands format, so you can just type `create-invoice --msatoshi 100000 --description test`, for example, and get a response in your terminal.
 
 - The STDIN/STDOUT interface works best if you're just running `cliche` in a terminal. In that case you can just use that same terminal window to execute commands.
+- If you have [`rlwrap`](https://github.com/hanslub42/rlwrap) (probably installable from your Linux default package manager) use it for a much better experience. Start `cliche` with `rlwrap cliche {...args}` and your life will be much better.
 - The websocket interface works fine too, specially if `cliche` is running as a service or as a subprocess somewhere else, in that case you can use a CLI tool like [`websocat`](https://github.com/vi/websocat), call `websocat ws://127.0.0.1:12000` then start typing commands.
 
 ## Programmatic Usage
