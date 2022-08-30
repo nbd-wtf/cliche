@@ -3,25 +3,34 @@
   "includes":[
     {
       "pattern":"\\QMETA-INF/maven/org.xerial/sqlite-jdbc/pom.properties\\E"
-    }, 
+    },
     {
       "pattern":"\\QMETA-INF/services/java.sql.Driver\\E"
-    }, 
+    },
     {
       "pattern":"\\Qbip39_english_wordlist.txt\\E"
-    }, 
+    },
     {
       "pattern":"\\Qelectrum/checkpoints_mainnet.json\\E"
-    }, 
+    },
     {
       "pattern":"\\Qelectrum/servers_mainnet.json\\E"
-    }, 
+    },
+    {
+      "pattern":"\\Qelectrum/servers_testnet.json\\E"
+    },
+    {
+      "pattern":"\\Qelectrum/servers_regtest.json\\E"
+    },
+    {
+      "pattern":"\\Qelectrum/servers_signet.json\\E"
+    },
     {
       "pattern":"\\Qfr/acinq/secp256k1/jni/native/linux-x86_64/libsecp256k1-jni.so\\E"
-    }, 
+    },
     {
       "pattern":"\\Qorg/sqlite/native/Linux/x86_64/libsqlitejdbc.so\\E"
-    }, 
+    },
     {
       "pattern":"\\Qreference.conf\\E"
     }
