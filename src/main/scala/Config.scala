@@ -1,8 +1,7 @@
 import java.io.File
 import com.typesafe.config.{ConfigFactory, Config => TypesafeConfig}
 import net.ceedubs.ficus.Ficus._
-import scoin.MnemonicCode
-import scoin.Crypto.randomBytes
+import scoin.{Crypto, MnemonicCode}
 
 object Config {
   val datadir = System.getProperty(
@@ -36,7 +35,7 @@ object Config {
         )
 
         val twelveWords = MnemonicCode
-          .toMnemonics(randomBytes(16))
+          .toMnemonics(Crypto.randomBytes(16))
           .mkString(" ")
         println(
           s"# if you don't have a mnemonic, here's one your computer has just generated: '${twelveWords}'."

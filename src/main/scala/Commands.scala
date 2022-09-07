@@ -2,44 +2,25 @@ import scala.util.chaining._
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
-import org.json4s.native.JsonMethods
-import org.json4s.JsonDSL.WithDouble._
-import org.json4s.JsonAST.{JValue, JObject, JArray}
 import com.softwaremill.quicklens.ModifyPimp
+import scodec.bits.ByteVector
 import fs2.concurrent.Topic
+import io.circe._
+import io.circe.syntax._
+import io.circe.generic.auto._
 import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
 import scoin.{
-  MilliSatoshi,
-  ShortChannelId,
   ByteVector32,
-  TimestampSecond,
   Satoshi,
+  ShortChannelId,
+  MilliSatoshi,
+  TimestampSecond,
   randomBytes32
 }
 import scoin.Crypto.{PrivateKey, PublicKey, sha256}
-import scoin.ln.{NodeAddress, Bolt11Invoice}
-import immortan.fsm.{
-  HCOpenHandler,
-  OutgoingPaymentListener,
-  OutgoingPaymentSenderData,
-  IncomingRevealed
-}
-import immortan.{
-  ~,
-  Channel,
-  ChannelHosted,
-  ChannelMaster,
-  CommitsAndMax,
-  ChanAndCommits,
-  LNParams,
-  PathFinder,
-  PaymentDescription,
-  RemoteNodeInfo,
-  PaymentInfo,
-  CommsTower,
-  ChannelUpdateOps
-}
+import scoin.ln.{Bolt11Invoice, NodeAddress}
+import immortan._
 import immortan.channel.{
   Commitments,
   NormalCommits,
@@ -47,39 +28,48 @@ import immortan.channel.{
   RemoteFulfill,
   HostedCommits
 }
-import immortan.utils.{PayRequest, PaymentRequestExt, BitcoinUri, LNUrl}
-import scodec.bits.ByteVector
-import immortan.utils.InputParser
+import immortan.fsm.{
+  HCOpenHandler,
+  OutgoingPaymentListener,
+  OutgoingPaymentSenderData,
+  IncomingRevealed
+}
+import immortan.utils.{
+  InputParser,
+  PayRequest,
+  PaymentRequestExt,
+  BitcoinUri,
+  LNUrl
+}
+import immortan.LNParams.ec
 
 sealed trait JSONRPCMessage {
   def render(forceCompact: Boolean = false): String = {
     val wrapped = this match {
       case JSONRPCError(id, err) =>
-        (
-          // @formatter:off
-          ("jsonrpc" -> "2.0") ~~
-          ("id" -> id) ~~
-          ("error" ->
-            (("message" -> err) ~~
-             ("code" -> 1))
+        Json.obj(
+          "jsonrpc" := "2.0",
+          "id" := id,
+          "error" := Json.obj(
+            "message" := err,
+            "code" := 1
           )
-          // @formatter:on
         )
       case JSONRPCResponse(id, result) =>
-        (("jsonrpc" -> "2.0") ~~ ("id" -> id) ~~ ("result" -> result))
+        Json.obj("jsonrpc" := "2.0", "id" := id, "result" := result)
       case JSONRPCNotification(method, params) =>
-        (("jsonrpc" -> "2.0") ~~ ("method" -> method) ~~ ("params" -> params))
+        Json.obj("jsonrpc" := "2.0", "method" := method, "params" := params)
     }
 
     (forceCompact || Config.compactJSON) match {
-      case true  => JsonMethods.compact(JsonMethods.render(wrapped))
-      case false => JsonMethods.pretty(JsonMethods.render(wrapped))
+      case true  => wrapped.noSpaces
+      case false => wrapped.toString
     }
   }
 }
-case class JSONRPCResponse(id: String, response: JValue) extends JSONRPCMessage
+case class JSONRPCResponse(id: String, response: Json) extends JSONRPCMessage
 case class JSONRPCError(id: String, error: String) extends JSONRPCMessage
-case class JSONRPCNotification(method: String, params: JValue)
+case class JSONRPCNotification(method: String, params: Json)
     extends JSONRPCMessage
 
 object Commands {
@@ -87,7 +77,7 @@ object Commands {
       id: String,
       topic: Topic[IO, JSONRPCMessage]
   ): IO[Unit] =
-    topic.publish1(JSONRPCResponse(id, ("ping" -> "pong"))) >> IO.unit
+    topic.publish1(JSONRPCResponse(id, Json.obj("ping" := "pong"))) >> IO.unit
 
   def getInfo(params: GetInfo)(implicit
       id: String,
@@ -96,52 +86,51 @@ object Commands {
     topic.publish1(
       JSONRPCResponse(
         id,
-        (
-          // @formatter:off
-          ("chain" -> LNParams.chainHash.toHex) ~~
-          ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
-          ("block_height" -> LNParams.blockCount.get()) ~~
-          ("wallets" ->
-            LNParams.chainWallets.wallets.map { w =>
-              (("label" -> w.info.label) ~~
-               ("balance" -> w.info.lastBalance.toLong) ~~
-               ("utxos" -> w.getData.utxos.map { utxo =>
-                 (("txid" -> utxo.item.txHash.toHex) ~~
-                  ("output" -> utxo.item.txPos) ~~
-                  ("height" -> utxo.item.height) ~~
-                  ("value" -> utxo.item.value))
-               } ))
-            }
-          ) ~~
-          ("channels_total_balance" ->
-            LNParams.cm.all.values.map(_.data.ourBalance.toLong).sum
-          ) ~~
-          ("channels" ->
-            LNParams.cm.all.values.map(channelAsJSON)
-          ) ~~
-          ("known_channels" ->
-            (("normal" -> DB.normalBag.getRoutingData.size) ~~
-             ("hosted" -> DB.hostedBag.getRoutingData.size))
-          ) ~~
-          ("outgoing_payments" ->
-            LNParams.cm.allInChannelOutgoing.toList.map { kv =>
-              (("hash" -> kv._1.paymentHash.toHex) ~~
-               ("htlcs" ->
-                 kv._2.map { htlcAdd =>
-                   (("id" -> htlcAdd.id) ~~
-                    ("msatoshi" -> htlcAdd.amountMsat.toLong) ~~
-                    ("channel" -> htlcAdd.channelId.toHex) ~~
-                    ("expiry" -> htlcAdd.cltvExpiry.toLong.toInt))
-                 }
-               ))
-            }
-          ) ~~
-          ("fee_rates" ->
-            (("1" -> LNParams.feeRates.info.smoothed.feePerBlock(1).toLong) ~~
-             ("10" -> LNParams.feeRates.info.smoothed.feePerBlock(10).toLong) ~~
-             ("100" -> LNParams.feeRates.info.smoothed.feePerBlock(100).toLong))
+        Json.obj(
+          "chain" := LNParams.chainHash.toHex,
+          "main_pubkey" := LNParams.secret.keys.ourNodePrivateKey.publicKey.toString,
+          "block_height" := LNParams.blockCount.get(),
+          "wallets" := LNParams.chainWallets.wallets.map { w =>
+            Json.obj(
+              "label" := w.info.label,
+              "balance" := w.info.lastBalance.toLong,
+              "utxos" := w.getData.utxos.map { utxo =>
+                Json.obj(
+                  "txid" := utxo.item.txHash.toHex,
+                  "output" := utxo.item.txPos,
+                  "height" := utxo.item.height,
+                  "value" := utxo.item.value
+                )
+              }
+            )
+          },
+          "channels_total_balance" := LNParams.cm.all.values
+            .map(_.data.ourBalance.toLong)
+            .sum,
+          "channels" := LNParams.cm.all.values.map(channelAsJSON),
+          "known_channels" := Json.obj(
+            "normal" := DB.normalBag.getRoutingData.size,
+            "hosted" := DB.hostedBag.getRoutingData.size
+          ),
+          "outgoing_payments" := LNParams.cm.allInChannelOutgoing.toList.map {
+            kv =>
+              Json.obj(
+                "hash" := kv._1.paymentHash.toHex,
+                "htlcs" := kv._2.map { htlcAdd =>
+                  Json.obj(
+                    "id" := htlcAdd.id,
+                    "msatoshi" := htlcAdd.amountMsat.toLong,
+                    "channel" := htlcAdd.channelId.toHex,
+                    "expiry" := htlcAdd.cltvExpiry.toLong
+                  )
+                }
+              )
+          },
+          "fee_rates" := Json.obj(
+            "1" := LNParams.feeRates.info.smoothed.feePerBlock(1),
+            "10" := LNParams.feeRates.info.smoothed.feePerBlock(10),
+            "100" := LNParams.feeRates.info.smoothed.feePerBlock(100)
           )
-          // @formatter:on
         )
       )
     ) >> IO.unit
@@ -216,15 +205,13 @@ object Commands {
                   Right(
                     JSONRPCResponse(
                       id,
-                      (
-                        // @formatter:off
-                        ("channel_id" -> cs.channelId.toHex) ~~
-                        ("peer" ->
-                          (("pubkey" -> cs.remoteInfo.nodeId.toString)) ~~
-                           ("our_pubkey" -> cs.remoteInfo.nodeSpecificPubKey.toString) ~~
-                           ("addr" -> cs.remoteInfo.address.toString())
+                      Json.obj(
+                        "channel_id" := cs.channelId.toHex,
+                        "peer" := Json.obj(
+                          "pubkey" := cs.remoteInfo.nodeId.toString,
+                          "our_pubkey" := cs.remoteInfo.nodeSpecificPubKey.toString,
+                          "addr" := cs.remoteInfo.address.toString
                         )
-                        // @formatter:on
                       )
                     )
                   )
@@ -238,7 +225,7 @@ object Commands {
                 LNParams.cm.initConnect()
 
                 // update view on hub activity and finalize local stuff
-                ChannelMaster.next(ChannelMaster.statusUpdateStream)
+                ChannelMaster.statusUpdateStream.fire()
               }
             }
           }
@@ -262,9 +249,11 @@ object Commands {
       case Some(hc) => {
         LNParams.cm.chanBag.delete(hc.channelId)
         LNParams.cm.all -= hc.channelId
-        ChannelMaster.next(ChannelMaster.stateUpdateStream)
+        ChannelMaster.stateUpdateStream.fire()
         CommsTower.disconnectNative(hc.remoteInfo)
-        topic.publish1(JSONRPCResponse(id, ("closed" -> true))) >> IO.unit
+        topic.publish1(
+          JSONRPCResponse(id, Json.obj("closed" := true))
+        ) >> IO.unit
       }
       case None =>
         topic.publish1(
@@ -280,11 +269,6 @@ object Commands {
       params: CreateInvoice
   )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
     // gather params
-    val preimage =
-      params.preimage
-        .flatMap(ByteVector.fromHex(_))
-        .map(new ByteVector32(_))
-        .getOrElse(randomBytes32())
     val msatoshi = params.msatoshi.map(MilliSatoshi(_))
     val descriptionTag =
       params.description
@@ -327,12 +311,15 @@ object Commands {
 
     // invoice secret and fake invoice private key
     val secret = randomBytes32()
+    val preimage = LNParams.cm.preimageFromSecret(secret)
     val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
 
     (Try {
       // build invoice
       val pr = new Bolt11Invoice(
-        Bolt11Invoice.prefixes(LNParams.chainHash),
+        Bolt11Invoice.prefixes.collectFirst {
+          case (hash, prefix) if hash == LNParams.chainHash => prefix
+        }.get,
         msatoshi,
         TimestampSecond(System.currentTimeMillis / 1000L),
         privateKey.publicKey, {
@@ -357,34 +344,17 @@ object Commands {
         ByteVector.empty
       ).sign(privateKey)
 
-      // store invoice on database
-      val prExt = PaymentRequestExt.from(pr)
-      LNParams.cm.payBag.replaceIncomingPayment(
-        prex = prExt,
-        preimage = preimage,
-        description = PaymentDescription(
-          split = None,
-          label = params.label,
-          semanticOrder = None,
-          invoiceText = params.description.getOrElse("")
-        ),
-        balanceSnap = MilliSatoshi(0L),
-        fiatRateSnap = Map.empty
-      )
-
-      prExt
+      PaymentRequestExt.from(pr)
     } match {
       case Success(prExt) =>
         topic.publish1(
           JSONRPCResponse(
             id,
-            (
-              // @formatter:off
-              ("invoice" -> prExt.raw) ~~
-              ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
-              ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
-              ("hints_count" -> prExt.pr.routingInfo.size)
-              // @formatter:on
+            Json.obj(
+              "invoice" := prExt.raw,
+              "msatoshi" := prExt.pr.amountOpt.map(_.toLong),
+              "payment_hash" := prExt.pr.paymentHash.toHex,
+              "hints_count" := prExt.pr.routingInfo.size
             )
           )
         )
@@ -450,13 +420,11 @@ object Commands {
         topic.publish1(
           JSONRPCResponse(
             id,
-            (
-              // @formatter:off
-              ("msatoshi" -> amount.toLong) ~~
-              ("fee_reserve" -> cmd.totalFeeReserve.toLong) ~~
-              ("payment_hash" -> cmd.fullTag.paymentHash.toHex) ~~
-              ("payee" -> cmd.targetNodeId.toString)
-              // @formatter:on
+            Json.obj(
+              "msatoshi" := amount.toLong,
+              "fee_reserve" := cmd.totalFeeReserve.toLong,
+              "payment_hash" := cmd.fullTag.paymentHash.toHex,
+              "payee" := cmd.targetNodeId.toString
             )
           )
         )
@@ -486,106 +454,99 @@ object Commands {
 
           Try(InputParser.parse(params.lnurl)) match {
             case Success(lnurl: LNUrl) => {
-              lnurl.level1DataResponse.subscribe(
-                {
-                  case lnurlpay: PayRequest => {
-                    dispatcher.unsafeRunAndForget(
-                      topic.publish1(
-                        JSONRPCNotification(
-                          "lnurlpay_params",
-                          (
-                            // @formatter:off
-                            ("min" -> lnurlpay.minSendable) ~~
-                            ("max" -> lnurlpay.maxSendable) ~~
-                            ("callback" -> lnurlpay.callback) ~~
-                            ("description" -> lnurlpay.meta.textShort) ~~
-                            ("comment" -> lnurlpay.commentAllowed) ~~
-                            ("payerdata" -> lnurlpay.payerData.map(pds =>
-                              (("auth", pds.auth.isDefined) ~~
-                               ("name", pds.name.isDefined) ~~
-                               ("pubkey", pds.pubkey.isDefined))
-                            ))
-                            // @formatter:on
+              lnurl.level1DataResponse.map {
+                case lnurlpay: PayRequest =>
+                  dispatcher.unsafeRunAndForget(
+                    topic.publish1(
+                      JSONRPCNotification(
+                        "lnurlpay_params",
+                        Json.obj(
+                          "min" := lnurlpay.minSendable,
+                          "max" := lnurlpay.maxSendable,
+                          "callback" := lnurlpay.callback,
+                          "description" := lnurlpay.meta.textShort,
+                          "comment" := lnurlpay.commentAllowed,
+                          "payerdata" := lnurlpay.payerData.map(pds =>
+                            Json.obj(
+                              "auth" := pds.auth.isDefined,
+                              "name" := pds.name.isDefined,
+                              "pubkey" := pds.pubkey.isDefined
+                            )
                           )
                         )
                       )
                     )
+                  )
 
-                    if (
-                      lnurlpay.maxSendable < params.msatoshi || lnurlpay.minSendable > params.msatoshi
-                    ) {
-                      dispatcher.unsafeRunAndForget(
-                        topic.publish1(
-                          JSONRPCError(
-                            id,
-                            s"amount provided (${params.msatoshi}) is not in the acceptable range ${lnurlpay.minSendable}-${lnurlpay.maxSendable}"
-                          )
-                        ) >> dummyTopic.close >> blocker.release
-                      )
-                    } else {
-                      lnurlpay
-                        .getFinal(
-                          amount = MilliSatoshi(params.msatoshi),
-                          comment = params.comment,
-                          name = params.name,
-                          authKeyHost =
-                            if (params.attachAuth) Some(lnurl.uri.getHost)
-                            else None
-                        )
-                        .subscribe(
-                          { lnurlpayfinal =>
-                            dispatcher.unsafeRunAndForget(
-                              payInvoice(
-                                PayInvoice(
-                                  invoice = lnurlpayfinal.pr,
-                                  msatoshi = None
-                                ),
-                                Set(new OutgoingPaymentListener {
-                                  override def gotFirstPreimage(
-                                      data: OutgoingPaymentSenderData,
-                                      fulfill: RemoteFulfill
-                                  ): Unit =
-                                    dispatcher.unsafeRunAndForget(
-                                      topic.publish1(
-                                        JSONRPCNotification(
-                                          "lnurlpay_success",
-                                          (
-                                            ("success_action" -> lnurlpayfinal.successAction
-                                              .map(
-                                                _.printable(
-                                                  fulfill.theirPreimage
-                                                )
-                                              ))
-                                          )
-                                        )
-                                      ) >> blocker.release
-                                    )
-
-                                  override def wholePaymentFailed(
-                                      data: OutgoingPaymentSenderData
-                                  ): Unit = dispatcher
-                                    .unsafeRunAndForget(blocker.release)
-                                })
-                              )(id, dummyTopic)
-                            )
-                          },
-                          onBadResponse
-                        )
-                    }
-                  }
-                  case _ => {
+                  if (
+                    lnurlpay.maxSendable < params.msatoshi || lnurlpay.minSendable > params.msatoshi
+                  ) {
                     dispatcher.unsafeRunAndForget(
                       topic.publish1(
                         JSONRPCError(
                           id,
-                          "got something that isn't a valid lnurl-pay response"
+                          s"amount provided (${params.msatoshi}) is not in the acceptable range ${lnurlpay.minSendable}-${lnurlpay.maxSendable}"
                         )
                       ) >> dummyTopic.close >> blocker.release
                     )
+                  } else {
+                    lnurlpay
+                      .getFinal(
+                        amount = MilliSatoshi(params.msatoshi),
+                        comment = params.comment,
+                        name = params.name,
+                        authKeyHost =
+                          if (params.attachAuth)
+                            Some(lnurl.url.hostOption.get.value)
+                          else None
+                      )
+                      .onComplete {
+                        case Success(lnurlpayfinal) =>
+                          dispatcher.unsafeRunAndForget(
+                            payInvoice(
+                              PayInvoice(
+                                invoice = lnurlpayfinal.pr,
+                                msatoshi = None
+                              ),
+                              Set(new OutgoingPaymentListener {
+                                override def gotFirstPreimage(
+                                    data: OutgoingPaymentSenderData,
+                                    fulfill: RemoteFulfill
+                                ): Unit =
+                                  dispatcher.unsafeRunAndForget(
+                                    topic.publish1(
+                                      JSONRPCNotification(
+                                        "lnurlpay_success",
+                                        Json.obj(
+                                          "success_action" := lnurlpayfinal.successAction
+                                            .map(
+                                              _.printable(fulfill.theirPreimage)
+                                            )
+                                        )
+                                      )
+                                    ) >> blocker.release
+                                  )
+
+                                override def wholePaymentFailed(
+                                    data: OutgoingPaymentSenderData
+                                ): Unit = dispatcher
+                                  .unsafeRunAndForget(blocker.release)
+                              })
+                            )(id, dummyTopic)
+                          )
+                        case Failure(err) => onBadResponse(err)
+                      }
                   }
-                },
-                onBadResponse
-              )
+                case _ =>
+                  dispatcher.unsafeRunAndForget(
+                    topic.publish1(
+                      JSONRPCError(
+                        id,
+                        "got something that isn't a valid lnurl-pay response"
+                      )
+                    ) >> dummyTopic.close >> blocker.release
+                  )
+              }
             }
             case _ => {
               dispatcher.unsafeRunAndForget(
@@ -629,13 +590,12 @@ object Commands {
     topic.publish1(
       JSONRPCResponse(
         id,
-        JArray(
-          LNParams.cm.payBag
-            .listRecentPayments(params.count.getOrElse(5))
-            .map(LNParams.cm.payBag.toPaymentInfo)
-            .map(paymentAsJSON)
-            .toList
-        )
+        LNParams.cm.payBag
+          .listRecentPayments(params.count.getOrElse(5))
+          .map(LNParams.cm.payBag.toPaymentInfo)
+          .map(paymentAsJSON)
+          .toList
+          .asJson
       )
     ) >> IO.unit
   }
@@ -646,27 +606,25 @@ object Commands {
     topic.publish1(
       JSONRPCResponse(
         id,
-        JArray(
-          LNParams.chainWallets.wallets.flatMap { w =>
-            w.getData.history.values.toList.flatten
-              .sortBy(item => if (item.height <= 0) 9999999 else item.height)
-              .map { item =>
-                val tx = w.getData.transactions(item.txHash)
-                val delta = w.getData.computeTransactionDelta(tx).get
+        LNParams.chainWallets.wallets.flatMap { w =>
+          w.getData.history.values.toList.flatten
+            .sortBy(item => if (item.height <= 0) 9999999 else item.height)
+            .map { item =>
+              val tx = w.getData.transactions(item.txHash)
+              val delta = w.getData.computeTransactionDelta(tx).get
 
-                // @formatter:off
-                (("txid" -> tx.txid.toString()) ~~
-                 ("block" -> item.height) ~~
-                 ("sent" -> delta.sent.toLong) ~~
-                 ("received" -> delta.received.toLong) ~~
-                 ("fee" -> delta.feeOpt.map(_.toLong).getOrElse(0L)) ~~
-                 ("utxos_spent" ->
-                    delta.spentUtxos.map(utxo => s"${utxo.item.txHash}:${utxo.item.txPos}")
-                 ))
-                // @formatter:on
-              }
-          }
-        )
+              Json.obj(
+                "txid" := tx.txid.toString,
+                "block" := item.height,
+                "sent" := delta.sent.toLong,
+                "received" := delta.received.toLong,
+                "fee" := delta.feeOpt.map(_.toLong).getOrElse(0L),
+                "utxos_spent" := delta.spentUtxos.map(utxo =>
+                  s"${utxo.item.txHash}:${utxo.item.txPos}"
+                )
+              )
+            }
+        }.asJson
       )
     ) >> IO.unit
   }
@@ -692,7 +650,7 @@ object Commands {
                 Right(
                   JSONRPCResponse(
                     id,
-                    ("address" -> address)
+                    Json.obj("address" := address)
                   )
                 )
               )
@@ -729,7 +687,9 @@ object Commands {
       case Some(chan: ChannelHosted) =>
         chan.acceptOverride() match {
           case Right(_) =>
-            topic.publish1(JSONRPCResponse(id, ("accepted" -> true))) >> IO.unit
+            topic.publish1(
+              JSONRPCResponse(id, Json.obj("accepted" := true))
+            ) >> IO.unit
           case Left(err) => topic.publish1(JSONRPCError(id, err)) >> IO.unit
         }
       case _ =>
@@ -753,7 +713,9 @@ object Commands {
       case Some(chan: ChannelHosted) =>
         chan.proposeResize(Satoshi(params.satoshiDelta)) match {
           case Right(_) =>
-            topic.publish1(JSONRPCResponse(id, ("proposed" -> true))) >> IO.unit
+            topic.publish1(
+              JSONRPCResponse(id, Json.obj("proposed" := true))
+            ) >> IO.unit
           case Left(err) => topic.publish1(JSONRPCError(id, err)) >> IO.unit
         }
       case _ =>
@@ -766,74 +728,83 @@ object Commands {
     }
   }
 
-  private def channelAsJSON(chan: Channel): JValue = {
+  private def channelAsJSON(chan: Channel): Json = {
     val commits = Channel.chanAndCommitsOpt(chan).map(_.commits)
 
-    val specificNormalOrHostedStuff: JObject = commits match {
+    val specificNormalOrHostedStuff: (String, Json) = commits match {
       case Some(hc: HostedCommits) =>
-        // @formatter:off
-        ("hosted_channel" ->
-          ("override_proposal" -> hc.overrideProposal.map(op =>
-            (("their_balance" -> op.localBalance.toLong) ~~
-             ("our_balance" -> (hc.lastCrossSignedState.initHostedChannel.channelCapacity.toLong - op.localBalance.toLong))))) ~~
-          ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
-        // @formatter:on
-      case Some(nc: NormalCommits) => ("normal_channel" -> "work in progress")
+        "hosted_channel" := Json.obj(
+          "override_proposal" := hc.overrideProposal.map { op =>
+            Json.obj(
+              "their_balance" := op.localBalance.toLong,
+              "our_balance" := (hc.lastCrossSignedState.initHostedChannel.channelCapacity.toLong - op.localBalance.toLong)
+            )
+          },
+          "resize_proposal" := hc.resizeProposal.map(
+            _.newCapacity.toLong * 1000
+          )
+        )
+      case Some(nc: NormalCommits) =>
+        "normal_channel" := "work in progress"
       case None =>
-        ("pending_channel" -> "we don't have any commitments for this one yet")
+        "pending_channel" := "we don't have any commitments for this one yet"
       case _ =>
-        ("weird_channel" -> "we don't really know what channel type this is")
+        "weird_channel" := "we don't really know what channel type this is"
     }
 
     val scid = commits match {
-      case Some(hc: HostedCommits) => Some(hc.shortChannelId.toString())
+      case Some(hc: HostedCommits) => Some(hc.shortChannelId.toString)
       case _                       => None
     }
 
-    // @formatter:off
-    (("id" -> commits.map(_.channelId.toHex)) ~~
-     ("short_channel_id" -> scid) ~~
-     ("label" -> commits.flatMap(_.remoteInfo
-       .alias.pipe(alias =>
-         if (alias == "unnamed") None else Some(alias)
-       )
-     )) ~~
-     ("peer" ->
-       (("pubkey" -> commits.map(_.remoteInfo.nodeId.toString)) ~~
-        ("our_pubkey" -> commits.map(_.remoteInfo.nodeSpecificPubKey.toString)) ~~
-        ("addr" -> commits.map(_.remoteInfo.address.toString())))
-     ) ~~
-     ("capacity" -> (chan.data.ourBalance.toLong + commits.map(_.availableForReceive.toLong).getOrElse(0L))) ~~
-     ("can_send" -> commits.map(_.availableForSend.toLong).getOrElse(0L)) ~~
-     ("can_receive" -> commits.map(_.availableForReceive.toLong).getOrElse(0L)) ~~
-     ("status" -> (
-       if (Channel.isOperationalAndOpen(chan)) { "open" }
-       else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
-       else if (Channel.isWaiting(chan)) { "waiting" }
-       else if (Channel.isErrored(chan)) { "error" }
-       else "unknown"
-     )) ~~
-     ("policy" ->
-       commits.flatMap(_.updateOpt).map(u =>
-        (("base_fee" -> u.feeBaseMsat.toLong) ~~
-         ("fee_per_millionth" -> u.feeProportionalMillionths) ~~
-         ("cltv_delta" -> u.cltvExpiryDelta.toInt) ~~
-         ("htlc_min" -> u.htlcMinimumMsat.toLong) ~~
-         ("htlc_max" -> u.htlcMaximumMsat.toLong))
-       )
-     ) ~~
-     ("inflight" ->
-       commits.map(c =>
-         (("outgoing" -> c.allOutgoing.size) ~~
-          ("incoming" -> c.crossSignedIncoming.size) ~~
-          ("revealed" -> c.revealedFulfills.size))
-       )
-     ) ~~
-     specificNormalOrHostedStuff)
-    // @formatter:on
+    Json.obj(
+      "id" := commits.map(_.channelId.toHex),
+      "short_channel_id" := scid,
+      "label" := commits.flatMap(
+        _.remoteInfo.alias.pipe(alias =>
+          if (alias == "unnamed") None else Some(alias)
+        )
+      ),
+      "peer" := Json.obj(
+        "pubkey" := commits.map(_.remoteInfo.nodeId.toString),
+        "our_pubkey" := commits.map(_.remoteInfo.nodeSpecificPubKey.toString),
+        "addr" := commits.map(_.remoteInfo.address.toString)
+      ),
+      "capacity" := (chan.data.ourBalance.toLong + commits
+        .map(_.availableForReceive.toLong)
+        .getOrElse(0L)),
+      "can_send" := commits.map(_.availableForSend.toLong).getOrElse(0L),
+      "can_receive" := commits.map(_.availableForReceive.toLong).getOrElse(0L),
+      "status" := (
+        if (Channel.isOperationalAndOpen(chan)) { "open" }
+        else if (Channel.isOperationalAndSleeping(chan)) { "sleeping" }
+        else if (Channel.isWaiting(chan)) { "waiting" }
+        else if (Channel.isErrored(chan)) { "error" }
+        else "unknown"
+      ),
+      "policy" := commits
+        .flatMap(_.updateOpt)
+        .map(u =>
+          Json.obj(
+            "base_fee" := u.feeBaseMsat.toLong,
+            "fee_per_millionth" := u.feeProportionalMillionths,
+            "cltv_delta" := u.cltvExpiryDelta.toInt,
+            "htlc_min" := u.htlcMinimumMsat.toLong,
+            "htlc_max" := u.htlcMaximumMsat.toLong
+          )
+        ),
+      "inflight" := commits.map(c =>
+        Json.obj(
+          "outgoing" := c.allOutgoing.size,
+          "incoming" := c.crossSignedIncoming.size,
+          "revealed" := c.revealedFulfills.size
+        )
+      ),
+      specificNormalOrHostedStuff
+    )
   }
 
-  private def paymentAsJSON(info: PaymentInfo): JValue = {
+  private def paymentAsJSON(info: PaymentInfo): Json = {
     val msatoshi = info.isIncoming match {
       case true  => info.received.toLong
       case false => info.sent.toLong
@@ -846,29 +817,27 @@ object Commands {
       case 3 => "complete"
     }
 
-    // @formatter:off
-    (("is_incoming" -> info.isIncoming) ~~
-     ("status" -> status) ~~
-     ("seen_at" -> info.seenAt) ~~
-     ("invoice" -> info.prString) ~~
-     ("preimage" -> info.preimage.toHex) ~~
-     ("msatoshi" -> msatoshi) ~~
-     ("updated_at" -> info.updatedAt) ~~
-     ("fee_msatoshi" -> info.fee.toLong) ~~
-     ("payment_hash" -> info.paymentHash.toHex))
-    // @formatter:on
+    Json.obj(
+      "is_incoming" := info.isIncoming,
+      "status" := status,
+      "seen_at" := info.seenAt,
+      "invoice" := info.prString,
+      "preimage" := info.preimage.toHex,
+      "msatoshi" := msatoshi,
+      "updated_at" := info.updatedAt,
+      "fee_msatoshi" := info.fee.toLong,
+      "payment_hash" := info.paymentHash.toHex
+    )
   }
 
   def onPaymentFailed(data: OutgoingPaymentSenderData): JSONRPCNotification =
     JSONRPCNotification(
       "payment_failed",
-      (
-        // @formatter:off
-        ("payment_hash" -> data.cmd.fullTag.paymentHash.toHex) ~~
-        ("parts" -> data.parts.size) ~~
-        ("routes" -> data.inFlightParts.map(_.route.asString)) ~~
-        ("failure" -> data.failures.map(_.asString))
-        // @formatter:on
+      Json.obj(
+        "payment_hash" := data.cmd.fullTag.paymentHash.toHex,
+        "parts" := data.parts.size,
+        "routes" := data.inFlightParts.map(_.route.asString),
+        "failure" := data.failures.map(_.asString)
       )
     )
 
@@ -880,13 +849,11 @@ object Commands {
 
     JSONRPCNotification(
       "payment_succeeded",
-      (
-        // @formatter:off
-        ("payment_hash" -> info.paymentHash.toHex) ~~
-        ("fee_msatoshi" -> info.fee.toLong) ~~
-        ("msatoshi" -> info.sent.toLong) ~~
-        ("preimage" -> info.preimage.toHex)
-        // @formatter:on
+      Json.obj(
+        "payment_hash" := info.paymentHash.toHex,
+        "fee_msatoshi" := info.fee.toLong,
+        "msatoshi" := info.sent.toLong,
+        "preimage" := info.preimage.toHex
       )
     )
   }
@@ -895,21 +862,19 @@ object Commands {
     JSONRPCNotification(
       "payment_received",
       LNParams.cm.payBag.getPaymentInfo(r.fullTag.paymentHash).toOption match {
-        case Some(info) => (
-          // @formatter:off
-          ("preimage" -> r.preimage.toHex) ~~
-          ("msatoshi" -> info.received.toLong) ~~
-          ("payment_hash" -> r.fullTag.paymentHash.toHex)
-          // @formatter:on
-        )
-        case None => (
-          // @formatter:off
-          ("preimage" -> r.preimage.toHex) ~~
-          ("payment_hash" -> r.fullTag.paymentHash.toHex)
-          // @formatter:on
-        )
+        case Some(info) =>
+          Json.obj(
+            "preimage" := r.preimage.toHex,
+            "msatoshi" := info.received.toLong,
+            "payment_hash" := r.fullTag.paymentHash.toHex
+          )
+        case None =>
+          Json.obj(
+            "preimage" := r.preimage.toHex,
+            "payment_hash" := r.fullTag.paymentHash.toHex
+          )
       }
     )
 
-  def onReady() = JSONRPCNotification("ready", JObject(List.empty))
+  def onReady() = JSONRPCNotification("ready", Json.obj())
 }

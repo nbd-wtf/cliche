@@ -1,48 +1,25 @@
 import java.net.InetSocketAddress
 import scala.annotation.nowarn
 import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.util.{Success, Failure}
 import cats.Parallel.parTuple5
 import cats.effect.{IO, IOApp}
 import cats.effect.std.Dispatcher
 import fs2.Stream
 import fs2.concurrent.Topic
 import com.softwaremill.quicklens._
-import castor.Context.Simple.global
 import scoin.{MnemonicCode, MilliSatoshi, Block, ByteVector32, Satoshi}
 import scoin.ln.{NodeAddress}
+import immortan._
+import immortan.router.Router
+import immortan.blockchain.EclairWallet
+import immortan.electrum._
+import immortan.channel.{RemoteFulfill, CMD_CHECK_FEERATE}
 import immortan.electrum.db.{
   CompleteChainWalletInfo,
   SigningWallet,
   WatchingWallet
-}
-import immortan.router.Router
-import immortan.channel.RemoteFulfill
-import immortan.blockchain.EclairWallet
-import immortan.electrum.{
-  ElectrumWallet,
-  ElectrumEclairWallet,
-  ElectrumChainSync,
-  ElectrumClientPool,
-  ElectrumWatcher,
-  WalletParameters,
-  CurrentBlockCount
-}
-import immortan.channel.{CMD_CHECK_FEERATE}
-import immortan.{
-  LNParams,
-  ChanFundingTxDescription,
-  Channel,
-  ChannelMaster,
-  CommsTower,
-  LightningNodeKeys,
-  PathFinder,
-  RemoteNodeInfo,
-  SyncParams,
-  TxDescription,
-  WalletExt,
-  WalletSecret,
-  ~,
-  none
 }
 import immortan.fsm.{
   OutgoingPaymentListener,
@@ -50,16 +27,13 @@ import immortan.fsm.{
   IncomingRevealed
 }
 import immortan.utils.{
-  Rx,
   FeeRates,
   FeeRatesInfo,
   FeeRatesListener,
   WalletEventsCatcher,
   WalletEventsListener
 }
-
-import utils.RequestsConnectionProvider
-import scala.concurrent.duration.FiniteDuration
+import immortan.LNParams.ec
 
 object Main extends IOApp.Simple {
   def init(): Unit = {
@@ -73,7 +47,7 @@ object Main extends IOApp.Simple {
     var lastTotalResyncStamp: Long = 0L
     var lastNormalResyncStamp: Long = 0L
 
-    LNParams.connectionProvider = new RequestsConnectionProvider
+    LNParams.connectionProvider = new ClicheConnectionProvider()
     CommsTower.workers.values.map(_.pair).foreach(CommsTower.forget)
     LNParams.logBag = DB.logBag
 
@@ -333,23 +307,16 @@ object Main extends IOApp.Simple {
       if (LNParams.cm.all.nonEmpty)
         pf.process(PathFinder.CMDStartPeriodicResync)
 
-      val feeratePeriodHours = 6
-      val rateRetry = Rx.retry(
-        Rx.ioQueue.map(_ => LNParams.feeRates.reloadData),
-        Rx.incSec,
-        3 to 18 by 3
-      )
-      val rateRepeat = Rx.repeat(
-        rateRetry,
-        Rx.incHour,
-        feeratePeriodHours to Int.MaxValue by feeratePeriodHours
-      )
-      val feerateObs = Rx.initDelay(
-        rateRepeat,
-        LNParams.feeRates.info.stamp,
-        feeratePeriodHours * 3600 * 1000L
-      )
-      feerateObs.foreach(LNParams.feeRates.updateInfo, none)
+      every(1.hour) {
+        LNParams.feeRates.reloadData().onComplete {
+          case Success(rates) =>
+            System.err.println(s"> fee rates updated: $rates")
+            LNParams.feeRates.updateInfo(rates)
+          case Failure(err) =>
+            System.err.println(s"> failed to update fee rates: $err")
+        }
+      }
+
     }
     println(s"# is operational: ${LNParams.isOperational}")
   }
@@ -363,7 +330,7 @@ object Main extends IOApp.Simple {
         for {
           _ <- IO.delay {
             dispatcher.unsafeRunAndForget(
-              IO.sleep(FiniteDuration(3, "seconds")) >> topic.publish1(
+              IO.sleep(3.seconds) >> topic.publish1(
                 Commands.onReady()
               ) >> IO.unit
             )
@@ -385,13 +352,15 @@ object Main extends IOApp.Simple {
                 )
             }
 
-            ChannelMaster.inFinalized
-              .collect { case revealed: IncomingRevealed => revealed }
-              .subscribe(r =>
+            ChannelMaster.inFinalized.subscribe {
+              case revealed: IncomingRevealed =>
                 dispatcher.unsafeRunAndForget(
-                  topic.publish1(Commands.onPaymentReceived(r)) >> IO.unit
+                  topic.publish1(
+                    Commands.onPaymentReceived(revealed)
+                  ) >> IO.unit
                 )
-              )
+              case _ =>
+            }
           }
           _ <- IO.never[Unit]
         } yield ()
@@ -400,7 +369,7 @@ object Main extends IOApp.Simple {
       parTuple5[IO, Unit, Unit, Unit, Unit, Unit](
         d,
         if (Config.nativeImageAgent) for {
-          _ <- IO.sleep(FiniteDuration(3, "seconds"))
+          _ <- IO.sleep(3.seconds)
           _ <- Handler.handle("ping")
           _ <- Handler.handle("{\"method\":\"get-info\", \"id\":\"0\"}")
           _ <- Handler.handle(

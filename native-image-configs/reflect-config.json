@@ -222,7 +222,7 @@
   "queryAllPublicConstructors":true
 },
 {
-  "name":"immortan.electrum.ElectrumClient$$anon$2"
+  "name":"immortan.electrum.ElectrumClient$$anon$1"
 },
 {
   "name":"immortan.electrum.ElectrumClient$ElectrumResponseDecoder"

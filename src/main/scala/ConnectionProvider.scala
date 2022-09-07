@@ -1,18 +1,20 @@
-package utils
-
 import java.net.InetSocketAddress
+import scala.concurrent.Future
 import requests.get
 import scoin.ln.{NodeAddress, IPv4, IPv6, Tor2, Tor3}
 import immortan.ConnectionProvider
+import immortan.LNParams.ec
 
-class RequestsConnectionProvider extends ConnectionProvider {
-  override val proxyAddress: Option[InetSocketAddress] = Option.empty
+class ClicheConnectionProvider extends immortan.ConnectionProvider {
+  override val proxyAddress: Option[java.net.InetSocketAddress] = Option.empty
   override def doWhenReady(action: => Unit): Unit = action
   override def getSocket: Socket = new Socket
-  override def get(url: String): String = try {
-    requests.get(url).text()
-  } catch {
-    case exc: requests.RequestFailedException => exc.response.data.toString
+  override def get(url: String): Future[String] = Future {
+    try {
+      requests.get(url).text()
+    } catch {
+      case exc: requests.RequestFailedException => exc.response.data.toString
+    }
   }
 }
 
@@ -21,8 +23,8 @@ class Socket extends immortan.Socket {
 
   def connect(address: NodeAddress, timeout: Int): Unit = {
     val socketAddress = address match {
-      case IPv4(ipv4, port) => new InetSocketAddress(ipv4.toString(), port)
-      case IPv6(ipv6, port) => new InetSocketAddress(ipv6.toString(), port)
+      case IPv4(ipv4, port) => new InetSocketAddress(ipv4.toString, port)
+      case IPv6(ipv6, port) => new InetSocketAddress(ipv6.toString, port)
       case Tor2(tor2, port) => new InetSocketAddress(tor2 + ".onion", port)
       case Tor3(tor3, port) => new InetSocketAddress(tor3 + ".onion", port)
     }

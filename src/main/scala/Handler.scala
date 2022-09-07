@@ -1,11 +1,14 @@
 import java.text.SimpleDateFormat
 import java.util.{Calendar, Date}
 import java.nio.file.{Files, Path, Paths}
-import spray.json._
 import caseapp.core
 import caseapp.CaseApp
+import io.circe.syntax._
+import io.circe.generic.auto._
+import io.circe.parser.parse
 import fs2.concurrent.Topic
 import cats.effect._
+import io.circe.JsonObject
 
 sealed trait Command
 case class UnknownCommand(method: String) extends Command
@@ -24,7 +27,6 @@ case class CreateInvoice(
     description: Option[String],
     description_hash: Option[String],
     msatoshi: Option[Long],
-    preimage: Option[String],
     label: Option[String]
 ) extends Command
 case class PayInvoice(invoice: String, msatoshi: Option[Long]) extends Command
@@ -52,8 +54,6 @@ case class ResizeHostedChannel(channelId: String, satoshiDelta: Long)
     extends Command
 
 object Handler {
-  import SprayConverters._
-
   def handle(
       input: String
   )(implicit topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
@@ -61,42 +61,35 @@ object Handler {
     else {
       val command =
         try {
-          val parsed = JsonParser(input).asInstanceOf[JsObject]
+          val c = parse(input).toTry.get.hcursor
           val (id, method, params) = (
-            parsed.fields
-              .get("id")
-              .map(_.asInstanceOf[JsString].value)
-              .getOrElse(""),
-            parsed.fields
-              .get("method")
-              .map(_.asInstanceOf[JsString].value)
-              .getOrElse(""),
-            parsed.fields.get("params").getOrElse(JsObject.empty)
+            c.get[String]("id").getOrElse(""),
+            c.get[String]("method").getOrElse(""),
+            c.downField("params")
           )
 
           method match {
-            case "ping"       => (id, params.convertTo[Ping])
-            case "get-info"   => (id, params.convertTo[GetInfo])
-            case "request-hc" => (id, params.convertTo[RequestHostedChannel])
-            case "create-invoice" => (id, params.convertTo[CreateInvoice])
-            case "pay-invoice"    => (id, params.convertTo[PayInvoice])
-            case "pay-lnurl"      => (id, params.convertTo[PayLnurl])
-            case "check-payment"  => (id, params.convertTo[CheckPayment])
-            case "list-payments"  => (id, params.convertTo[ListPayments])
-            case "list-txs"       => (id, params.convertTo[ListTransactions])
-            case "remove-hc"      => (id, params.convertTo[RemoveHostedChannel])
-            case "accept-override" => (id, params.convertTo[AcceptOverride])
-            case "resize-hc"   => (id, params.convertTo[ResizeHostedChannel])
-            case "get-address" => (id, params.convertTo[GetAddress])
-            case "send-to-address" => (id, params.convertTo[SendToAddress])
-            case "open-nc"         => (id, params.convertTo[OpenNormalChannel])
-            case "close-nc"        => (id, params.convertTo[CloseNormalChannel])
+            case "ping"            => (id, params.as[Ping])
+            case "get-info"        => (id, params.as[GetInfo])
+            case "request-hc"      => (id, params.as[RequestHostedChannel])
+            case "create-invoice"  => (id, params.as[CreateInvoice])
+            case "pay-invoice"     => (id, params.as[PayInvoice])
+            case "pay-lnurl"       => (id, params.as[PayLnurl])
+            case "check-payment"   => (id, params.as[CheckPayment])
+            case "list-payments"   => (id, params.as[ListPayments])
+            case "list-txs"        => (id, params.as[ListTransactions])
+            case "remove-hc"       => (id, params.as[RemoveHostedChannel])
+            case "accept-override" => (id, params.as[AcceptOverride])
+            case "resize-hc"       => (id, params.as[ResizeHostedChannel])
+            case "get-address"     => (id, params.as[GetAddress])
+            case "send-to-address" => (id, params.as[SendToAddress])
+            case "open-nc"         => (id, params.as[OpenNormalChannel])
+            case "close-nc"        => (id, params.as[CloseNormalChannel])
             case _                 => (id, UnknownCommand(method))
           }
         } catch {
           case exc
               if exc
-                .isInstanceOf[spray.json.JsonParser.ParsingException] || exc
                 .isInstanceOf[java.lang.ClassCastException] => {
             val spl = input.trim().split(" ")
             val method = spl(0)
@@ -157,39 +150,4 @@ object Handler {
       }
     }
   }
-}
-
-object SprayConverters extends DefaultJsonProtocol {
-  implicit val convertPing: JsonFormat[Ping] =
-    jsonFormat0(Ping.apply)
-  implicit val convertGetInfo: JsonFormat[GetInfo] =
-    jsonFormat0(GetInfo.apply)
-  implicit val convertRequestHostedChannel: JsonFormat[RequestHostedChannel] =
-    jsonFormat5(RequestHostedChannel.apply)
-  implicit val convertRemoveHostedChannel: JsonFormat[RemoveHostedChannel] =
-    jsonFormat1(RemoveHostedChannel.apply)
-  implicit val convertCreateInvoice: JsonFormat[CreateInvoice] =
-    jsonFormat5(CreateInvoice.apply)
-  implicit val convertPayInvoice: JsonFormat[PayInvoice] =
-    jsonFormat2(PayInvoice.apply)
-  implicit val convertPayLnurl: JsonFormat[PayLnurl] =
-    jsonFormat5(PayLnurl.apply)
-  implicit val convertCheckPayment: JsonFormat[CheckPayment] =
-    jsonFormat1(CheckPayment.apply)
-  implicit val convertListPayments: JsonFormat[ListPayments] =
-    jsonFormat1(ListPayments.apply)
-  implicit val convertListTransactions: JsonFormat[ListTransactions] =
-    jsonFormat1(ListTransactions.apply)
-  implicit val convertGetAddress: JsonFormat[GetAddress] =
-    jsonFormat0(GetAddress.apply)
-  implicit val convertSendToAddress: JsonFormat[SendToAddress] =
-    jsonFormat2(SendToAddress.apply)
-  implicit val convertOpenNormalChannel: JsonFormat[OpenNormalChannel] =
-    jsonFormat4(OpenNormalChannel.apply)
-  implicit val convertCloseNormalChannel: JsonFormat[CloseNormalChannel] =
-    jsonFormat1(CloseNormalChannel.apply)
-  implicit val convertAcceptOverride: JsonFormat[AcceptOverride] =
-    jsonFormat1(AcceptOverride.apply)
-  implicit val convertResizeHostedChannel: JsonFormat[ResizeHostedChannel] =
-    jsonFormat2(ResizeHostedChannel.apply)
 }
