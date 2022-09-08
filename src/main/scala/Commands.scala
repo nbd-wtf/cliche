@@ -88,6 +88,7 @@ object Commands {
         id,
         (
           // @formatter:off
+          ("chain" -> LNParams.chainHash.toHex) ~~
           ("main_pubkey" -> LNParams.secret.keys.ourNodePrivateKey.publicKey.toString) ~~
           ("block_height" -> LNParams.blockCount.get()) ~~
           ("wallets" ->
