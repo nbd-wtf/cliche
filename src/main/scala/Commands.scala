@@ -94,7 +94,13 @@ object Commands {
           ("wallets" ->
             LNParams.chainWallets.wallets.map { w =>
               (("label" -> w.info.label) ~~
-               ("balance" -> w.info.lastBalance.toLong))
+               ("balance" -> w.info.lastBalance.toLong) ~~
+               ("utxos" -> w.getData.utxos.map { utxo =>
+                 (("txid" -> utxo.item.txHash.toHex) ~~
+                  ("output" -> utxo.item.txPos) ~~
+                  ("height" -> utxo.item.height) ~~
+                  ("value" -> utxo.item.value))
+               } ))
             }
           ) ~~
           ("channels_total_balance" ->
@@ -617,6 +623,37 @@ object Commands {
             .map(LNParams.cm.payBag.toPaymentInfo)
             .map(paymentAsJSON)
             .toList
+        )
+      )
+    ) >> IO.unit
+  }
+
+  def listTransactions(
+      params: ListTransactions
+  )(implicit id: String, topic: Topic[IO, JSONRPCMessage]): IO[Unit] = {
+    topic.publish1(
+      JSONRPCResponse(
+        id,
+        JArray(
+          LNParams.chainWallets.wallets.flatMap { w =>
+            w.getData.history.values.toList.flatten
+              .sortBy(item => -item.height)
+              .map { item =>
+                val tx = w.getData.transactions(item.txHash)
+                val delta = w.getData.computeTransactionDelta(tx).get
+
+                // @formatter:off
+                (("txid" -> tx.txid.toString()) ~~
+                 ("block" -> item.height) ~~
+                 ("sent" -> delta.sent.toLong) ~~
+                 ("received" -> delta.received.toLong) ~~
+                 ("fee" -> delta.feeOpt.map(_.toLong).getOrElse(0L)) ~~
+                 ("utxos_spent" ->
+                    delta.spentUtxos.map(utxo => s"${utxo.item.txHash}:${utxo.item.txPos}")
+                 ))
+                // @formatter:on
+              }
+          }
         )
       )
     ) >> IO.unit

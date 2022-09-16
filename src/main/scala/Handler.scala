@@ -36,6 +36,7 @@ case class PayLnurl(
 ) extends Command
 case class CheckPayment(hash: String) extends Command
 case class ListPayments(count: Option[Int]) extends Command
+case class ListTransactions(count: Option[Int]) extends Command
 case class GetAddress() extends Command
 case class SendToAddress(address: String, satoshi: Option[Long]) extends Command
 case class OpenNormalChannel(
@@ -81,6 +82,7 @@ object Handler {
             case "pay-lnurl"      => (id, params.convertTo[PayLnurl])
             case "check-payment"  => (id, params.convertTo[CheckPayment])
             case "list-payments"  => (id, params.convertTo[ListPayments])
+            case "list-txs"       => (id, params.convertTo[ListTransactions])
             case "remove-hc"      => (id, params.convertTo[RemoveHostedChannel])
             case "accept-override" => (id, params.convertTo[AcceptOverride])
             case "resize-hc"   => (id, params.convertTo[ResizeHostedChannel])
@@ -108,6 +110,7 @@ object Handler {
               case "pay-lnurl"      => CaseApp.parse[PayLnurl](tail)
               case "check-payment"  => CaseApp.parse[CheckPayment](tail)
               case "list-payments"  => CaseApp.parse[ListPayments](tail)
+              case "list-txs"       => CaseApp.parse[ListTransactions](tail)
               case "remove-hc"      => CaseApp.parse[RemoveHostedChannel](tail)
               case "get-address"    => CaseApp.parse[GetAddress](tail)
               case "send-to-address" => CaseApp.parse[SendToAddress](tail)
@@ -139,6 +142,7 @@ object Handler {
         case params: PayLnurl             => Commands.payLnurl(params)
         case params: CheckPayment         => Commands.checkPayment(params)
         case params: ListPayments         => Commands.listPayments(params)
+        case params: ListTransactions     => Commands.listTransactions(params)
         case params: AcceptOverride       => Commands.acceptOverride(params)
         case params: ResizeHostedChannel  => Commands.resizeHC(params)
         case params: GetAddress           => Commands.getAddress(params)
@@ -173,6 +177,8 @@ object SprayConverters extends DefaultJsonProtocol {
     jsonFormat1(CheckPayment.apply)
   implicit val convertListPayments: JsonFormat[ListPayments] =
     jsonFormat1(ListPayments.apply)
+  implicit val convertListTransactions: JsonFormat[ListTransactions] =
+    jsonFormat1(ListTransactions.apply)
   implicit val convertGetAddress: JsonFormat[GetAddress] =
     jsonFormat0(GetAddress.apply)
   implicit val convertSendToAddress: JsonFormat[SendToAddress] =

@@ -17,14 +17,15 @@ import fr.acinq.eclair.blockchain.electrum.db.{
 }
 import fr.acinq.eclair.router.Router
 import fr.acinq.eclair.transactions.RemoteFulfill
-import fr.acinq.eclair.blockchain.{CurrentBlockCount, EclairWallet}
+import fr.acinq.eclair.blockchain.EclairWallet
 import fr.acinq.eclair.blockchain.electrum.{
   ElectrumWallet,
   ElectrumEclairWallet,
   ElectrumChainSync,
   ElectrumClientPool,
   ElectrumWatcher,
-  WalletParameters
+  WalletParameters,
+  CurrentBlockCount
 }
 import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE}
 import immortan.{
@@ -65,7 +66,6 @@ object Main extends IOApp.Simple {
     Config.print()
 
     println("# initializing parameters")
-    var currentChainNode: Option[InetSocketAddress] = None
     var totalBalance = Satoshi(0L)
     var txDescriptions: Map[ByteVector32, TxDescription] = Map.empty
 
@@ -168,7 +168,7 @@ object Main extends IOApp.Simple {
               ) =>
             val signingWallet =
               ext.makeSigningWalletParts(core, lastBalance, label)
-            signingWallet.wallet.send(persistentSigningWalletData)
+            signingWallet.wallet.load(persistentSigningWalletData)
             ext.copy(wallets = signingWallet :: ext.wallets)
 
           case ext ~ CompleteChainWalletInfo(
@@ -180,7 +180,7 @@ object Main extends IOApp.Simple {
               ) =>
             val watchingWallet =
               ext.makeWatchingWallet84Parts(core, lastBalance, label)
-            watchingWallet.wallet.send(persistentWatchingWalletData)
+            watchingWallet.wallet.load(persistentWatchingWalletData)
             ext.copy(wallets = watchingWallet :: ext.wallets)
         }
 
@@ -224,11 +224,6 @@ object Main extends IOApp.Simple {
           }
         }
       }
-
-      override def onChainMasterSelected(addr: InetSocketAddress): Unit =
-        currentChainNode = Some(addr)
-
-      override def onChainDisconnected(): Unit = currentChainNode = None
 
       override def onTransactionReceived(
           txEvent: ElectrumWallet.TransactionReceived
