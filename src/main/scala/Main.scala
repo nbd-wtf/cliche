@@ -100,10 +100,7 @@ object Main extends IOApp.Simple {
     }
 
     LNParams.secret = WalletSecret(Config.seed)
-
-    DB.extDataBag.db txWrap {
-      LNParams.feeRates = new FeeRates(DB.extDataBag)
-    }
+    LNParams.feeRates = new FeeRates(DB.extDataBag)
 
     println("# setting up pathfinder")
     val pf = new PathFinder(DB.normalBag, DB.hostedBag) {
@@ -258,7 +255,7 @@ object Main extends IOApp.Simple {
             description: TxDescription,
             isIncoming: Long,
             totalBalance: MilliSatoshi
-        ): Unit = DB.txDataBag.db txWrap {
+        ): Unit = {
           DB.txDataBag.addTx(
             txEvent.tx,
             txEvent.depth,

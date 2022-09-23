@@ -637,7 +637,7 @@ object Commands {
         JArray(
           LNParams.chainWallets.wallets.flatMap { w =>
             w.getData.history.values.toList.flatten
-              .sortBy(item => -item.height)
+              .sortBy(item => if (item.height <= 0) 9999999 else item.height)
               .map { item =>
                 val tx = w.getData.transactions(item.txHash)
                 val delta = w.getData.computeTransactionDelta(tx).get
