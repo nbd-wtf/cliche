@@ -16,7 +16,8 @@ case class RequestHostedChannel(
     pubkey: String,
     host: String,
     port: Int,
-    label: Option[String]
+    label: Option[String],
+    secret: Option[String]
 ) extends Command
 case class RemoveHostedChannel(channelId: String) extends Command
 case class CreateInvoice(
@@ -164,7 +165,7 @@ object SprayConverters extends DefaultJsonProtocol {
   implicit val convertGetInfo: JsonFormat[GetInfo] =
     jsonFormat0(GetInfo.apply)
   implicit val convertRequestHostedChannel: JsonFormat[RequestHostedChannel] =
-    jsonFormat4(RequestHostedChannel.apply)
+    jsonFormat5(RequestHostedChannel.apply)
   implicit val convertRemoveHostedChannel: JsonFormat[RemoveHostedChannel] =
     jsonFormat1(RemoveHostedChannel.apply)
   implicit val convertCreateInvoice: JsonFormat[CreateInvoice] =

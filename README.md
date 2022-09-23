@@ -144,12 +144,12 @@ This is intended to be started by a different program and methods to be called b
 ### Methods
 
 - `get-info`, params: none
-- `request-hc`, params: `pubkey` (string), `host` (string), `port` (number)
+- `request-hc`, params: `pubkey` (string), `host` (string), `port` (number), `label` (string, optional), `secret` (hex string, optional)
 - `remove-hc`, params: `channel-id` (string)
-- `create-invoice`, params: `msatoshi` (number, optional), `description` (string, optional), `description_hash` (string, optional), `preimage` (string, optional)
+- `create-invoice`, params: `msatoshi` (number, optional), `description` (string, optional), `description_hash` (hex string, optional), `preimage` (string, optional)
 - `pay-invoice`, params: `invoice` (string), `msatoshi` (number, optional)
 - `pay-lnurl`, params: `lnurl` (string, accepts LUD-01, LUD-16 and LUD-17 formats), `msatoshi`, (number, required), `comment` (string, optional, for LUD-12), `name` (string, optional, for LUD-18), `attach-auth` (boolean, defaults to true, for LUD-18)
-- `check-payment` (works for both incoming and outgoing payments), params: `hash` (string)
+- `check-payment` (works for both incoming and outgoing payments), params: `hash` (hex string)
 - `list-payments`, params: `count` (optional, int)
 - `accept-override`, params: `channel-id` (string)
 - `get-address`, params: none

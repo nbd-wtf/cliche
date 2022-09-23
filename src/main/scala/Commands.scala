@@ -182,7 +182,9 @@ object Commands {
 
             new HCOpenHandler(
               target,
-              randomBytes32,
+              params.secret
+                .flatMap(ByteVector.fromHex(_).map(ByteVector32(_)))
+                .getOrElse(randomBytes32),
               localParams.defaultFinalScriptPubKey,
               LNParams.cm
             ) {
