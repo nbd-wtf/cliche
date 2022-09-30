@@ -181,6 +181,6 @@ If your `build.sbt` happen to have an Immortan version ending with `-SNAPSHOT` t
 
 This is a list of projects using `cliche`:
 
+  - [LNbits](https://github.com/lnbits/lnbits/blob/4ad3c841528de3efafefe48f667e6800eb7074e3/lnbits/wallets/cliche.py), a multipurpose extensible web Lightning Wallet provider
   - [@lntxbot](https://github.com/fiatjaf/lntxbot), a Telegram bot that does Lightning tips and payments
-  - [LNbits Infinity](https://github.com/lnbits/infinity), a multipurpose extensible web Lightning Wallet provider
   - [relampago](https://github.com/lnbits/relampago), a Golang library for talking to any kind of Lightning backend
