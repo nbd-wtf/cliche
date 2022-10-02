@@ -11,7 +11,7 @@ import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
 import fr.acinq.eclair.channel.{Commitments, NormalCommits, DATA_NORMAL}
 import fr.acinq.eclair.{ShortChannelId, MilliSatoshi, randomBytes32}
-import fr.acinq.eclair.wire.{NodeAddress}
+import fr.acinq.eclair.wire.NodeAddress
 import fr.acinq.eclair.payment.{Bolt11Invoice}
 import fr.acinq.eclair.transactions.RemoteFulfill
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}

@@ -20,6 +20,12 @@ object Config {
   val nativeImageAgent = c.as[Boolean]("nativeImageAgent")
 
   val network = c.as[String]("cliche.network")
+  val electrum = Option(
+    System.getProperty(
+      "cliche.electrum",
+      null
+    )
+  )
   val seed =
     try {
       c.as[String]("cliche.seed").split(" ").toList
@@ -59,7 +65,7 @@ object Config {
 
   def print(): Unit = {
     println(
-      s"# loaded configs: network=$network json.compact=$compactJSON websocket.host=${websocketHost} websocket.port=${websocketPort}"
+      s"# loaded configs: network=$network electrum=$electrum json.compact=$compactJSON websocket.host=${websocketHost} websocket.port=${websocketPort}"
     )
   }
 }

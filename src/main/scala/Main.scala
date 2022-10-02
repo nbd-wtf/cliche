@@ -27,6 +27,7 @@ import fr.acinq.eclair.blockchain.electrum.{
   WalletParameters,
   CurrentBlockCount
 }
+import fr.acinq.eclair.wire.{NodeAddress, Domain}
 import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE}
 import immortan.{
   LNParams,
@@ -80,7 +81,7 @@ object Main extends IOApp.Simple {
       case "mainnet" => LNParams.chainHash = Block.LivenetGenesisBlock.hash
       case "testnet" => LNParams.chainHash = Block.TestnetGenesisBlock.hash
       case "regtest" => LNParams.chainHash = Block.RegtestGenesisBlock.hash
-      case "signet"  => LNParams.chainHash = Block.SegnetGenesisBlock.hash
+      case "signet"  => LNParams.chainHash = Block.SignetGenesisBlock.hash
       case _ =>
         println(
           s"< impossible config.network option ${Config.network}"
@@ -124,7 +125,11 @@ object Main extends IOApp.Simple {
     println("# instantiating electrum actors")
     val pool = new ElectrumClientPool(
       LNParams.blockCount,
-      LNParams.chainHash
+      LNParams.chainHash,
+      customAddress = Config.electrum.map { addr =>
+        val hostOrIP ~ port = addr.splitAt(addr.lastIndexOf(':'))
+        NodeAddress.fromParts(hostOrIP, port.tail.toInt, Domain)
+      }
     )
     val sync = new ElectrumChainSync(
       pool,
