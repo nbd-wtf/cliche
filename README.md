@@ -1,3 +1,5 @@
+<a href="https://nbd.wtf"><img align="right" height="196" src="https://user-images.githubusercontent.com/1653275/194609043-0add674b-dd40-41ed-986c-ab4a2e053092.png" /></a>
+
 # Client for Lightning-compatible Lite Channels aka "Hosted"
 
 This is an amazing piece of software, still work-in-progress, based on [IMMORTAN](https://github.com/fiatjaf/immortan), that can do Lightning things, it is a "lite node", as we may call.
