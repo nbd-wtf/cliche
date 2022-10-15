@@ -9,13 +9,16 @@ import com.softwaremill.quicklens.ModifyPimp
 import fs2.concurrent.Topic
 import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
-import fr.acinq.eclair.channel.{Commitments, NormalCommits, DATA_NORMAL}
-import fr.acinq.eclair.{ShortChannelId, MilliSatoshi, randomBytes32}
-import fr.acinq.eclair.wire.NodeAddress
-import fr.acinq.eclair.payment.{Bolt11Invoice}
-import fr.acinq.eclair.transactions.RemoteFulfill
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256}
-import fr.acinq.bitcoin.{ByteVector32, Satoshi}
+import scoin.{
+  MilliSatoshi,
+  ShortChannelId,
+  ByteVector32,
+  TimestampSecond,
+  Satoshi,
+  randomBytes32
+}
+import scoin.Crypto.{PrivateKey, PublicKey, sha256}
+import scoin.ln.{NodeAddress, Bolt11Invoice}
 import immortan.fsm.{
   HCOpenHandler,
   OutgoingPaymentListener,
@@ -23,9 +26,9 @@ import immortan.fsm.{
   IncomingRevealed
 }
 import immortan.{
+  ~,
   Channel,
   ChannelHosted,
-  HostedCommits,
   ChannelMaster,
   CommitsAndMax,
   ChanAndCommits,
@@ -34,10 +37,17 @@ import immortan.{
   PaymentDescription,
   RemoteNodeInfo,
   PaymentInfo,
-  CommsTower
+  CommsTower,
+  ChannelUpdateOps
+}
+import immortan.channel.{
+  Commitments,
+  NormalCommits,
+  DATA_NORMAL,
+  RemoteFulfill,
+  HostedCommits
 }
 import immortan.utils.{PayRequest, PaymentRequestExt, BitcoinUri, LNUrl}
-import immortan.crypto.Tools.{~}
 import scodec.bits.ByteVector
 import immortan.utils.InputParser
 
@@ -121,7 +131,7 @@ object Commands {
                    (("id" -> htlcAdd.id) ~~
                     ("msatoshi" -> htlcAdd.amountMsat.toLong) ~~
                     ("channel" -> htlcAdd.channelId.toHex) ~~
-                    ("expiry" -> htlcAdd.cltvExpiry.underlying))
+                    ("expiry" -> htlcAdd.cltvExpiry.toLong.toInt))
                  }
                ))
             }
@@ -149,7 +159,7 @@ object Commands {
       Try(
         RemoteNodeInfo(
           PublicKey(ByteVector.fromValidHex(params.pubkey)),
-          NodeAddress.fromParts(host = params.host, port = params.port),
+          NodeAddress.fromParts(host = params.host, port = params.port).get,
           params.label.getOrElse("unnamed")
         )
       ).toEither
@@ -184,7 +194,7 @@ object Commands {
               target,
               params.secret
                 .flatMap(ByteVector.fromHex(_).map(ByteVector32(_)))
-                .getOrElse(randomBytes32),
+                .getOrElse(randomBytes32()),
               localParams.defaultFinalScriptPubKey,
               LNParams.cm
             ) {
@@ -274,7 +284,7 @@ object Commands {
       params.preimage
         .flatMap(ByteVector.fromHex(_))
         .map(new ByteVector32(_))
-        .getOrElse(randomBytes32)
+        .getOrElse(randomBytes32())
     val msatoshi = params.msatoshi.map(MilliSatoshi(_))
     val descriptionTag =
       params.description
@@ -316,7 +326,7 @@ object Commands {
     }
 
     // invoice secret and fake invoice private key
-    val secret = randomBytes32
+    val secret = randomBytes32()
     val privateKey = LNParams.secret.keys.fakeInvoiceKey(secret)
 
     (Try {
@@ -324,7 +334,7 @@ object Commands {
       val pr = new Bolt11Invoice(
         Bolt11Invoice.prefixes(LNParams.chainHash),
         msatoshi,
-        System.currentTimeMillis / 1000L,
+        TimestampSecond(System.currentTimeMillis / 1000L),
         privateKey.publicKey, {
           val defaultTags = List(
             Some(Bolt11Invoice.PaymentHash(sha256(preimage))),
@@ -333,7 +343,7 @@ object Commands {
             Some(Bolt11Invoice.Expiry(3600 * 24 * 2 /* 2 days */ )),
             Some(
               Bolt11Invoice.MinFinalCltvExpiry(
-                LNParams.incomingFinalCltvExpiry.underlying
+                LNParams.incomingFinalCltvExpiry.toInt
               )
             ),
             Some(
@@ -371,7 +381,7 @@ object Commands {
             (
               // @formatter:off
               ("invoice" -> prExt.raw) ~~
-              ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
+              ("msatoshi" -> prExt.pr.amount_opt.map(_.toLong)) ~~
               ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
               ("hints_count" -> prExt.pr.routingInfo.size)
               // @formatter:on
@@ -393,7 +403,7 @@ object Commands {
     (Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
       case None => topic.publish1(JSONRPCError(id, "invalid invoice"))
       case Some(prExt)
-          if prExt.pr.amountOpt.isEmpty && params.msatoshi.isEmpty =>
+          if prExt.pr.amount_opt.isEmpty && params.msatoshi.isEmpty =>
         topic.publish1(JSONRPCError(id, "missing amount"))
       case Some(prExt) if prExt.pr.paymentSecret == None =>
         topic.publish1(JSONRPCError(id, "missing payment secret"))
@@ -406,7 +416,7 @@ object Commands {
         val amount =
           params.msatoshi
             .map(MilliSatoshi(_))
-            .orElse(prExt.pr.amountOpt)
+            .orElse(prExt.pr.amount_opt)
             .getOrElse(MilliSatoshi(0L))
 
         val cmd = LNParams.cm
@@ -764,8 +774,8 @@ object Commands {
         // @formatter:off
         ("hosted_channel" ->
           ("override_proposal" -> hc.overrideProposal.map(op =>
-            (("their_balance" -> op.localBalanceMsat.toLong) ~~
-             ("our_balance" -> (hc.lastCrossSignedState.initHostedChannel.channelCapacityMsat.toLong - op.localBalanceMsat.toLong))))) ~~
+            (("their_balance" -> op.localBalance.toLong) ~~
+             ("our_balance" -> (hc.lastCrossSignedState.initHostedChannel.channelCapacity.toLong - op.localBalance.toLong))))) ~~
           ("resize_proposal" -> hc.resizeProposal.map(_.newCapacity.toLong * 1000)))
         // @formatter:on
       case Some(nc: NormalCommits) => ("normal_channel" -> "work in progress")
@@ -776,9 +786,8 @@ object Commands {
     }
 
     val scid = commits match {
-      case Some(hc: HostedCommits) =>
-        Some(ShortChannelId.asString(hc.shortChannelId))
-      case _ => None
+      case Some(hc: HostedCommits) => Some(hc.shortChannelId.toString())
+      case _                       => None
     }
 
     // @formatter:off
@@ -808,9 +817,9 @@ object Commands {
        commits.flatMap(_.updateOpt).map(u =>
         (("base_fee" -> u.feeBaseMsat.toLong) ~~
          ("fee_per_millionth" -> u.feeProportionalMillionths) ~~
-         ("cltv_delta" -> u.cltvExpiryDelta.underlying) ~~
+         ("cltv_delta" -> u.cltvExpiryDelta.toInt) ~~
          ("htlc_min" -> u.htlcMinimumMsat.toLong) ~~
-         ("htlc_max" -> u.htlcMaximumMsat.map(_.toLong)))
+         ("htlc_max" -> u.htlcMaximumMsat.toLong))
        )
      ) ~~
      ("inflight" ->

@@ -8,17 +8,17 @@ import fs2.Stream
 import fs2.concurrent.Topic
 import com.softwaremill.quicklens._
 import castor.Context.Simple.global
-import fr.acinq.eclair.{MilliSatoshi}
-import fr.acinq.bitcoin.{MnemonicCode, Block, ByteVector32, Satoshi}
-import fr.acinq.eclair.blockchain.electrum.db.{
+import scoin.{MnemonicCode, MilliSatoshi, Block, ByteVector32, Satoshi}
+import scoin.ln.{NodeAddress}
+import immortan.electrum.db.{
   CompleteChainWalletInfo,
   SigningWallet,
   WatchingWallet
 }
-import fr.acinq.eclair.router.Router
-import fr.acinq.eclair.transactions.RemoteFulfill
-import fr.acinq.eclair.blockchain.EclairWallet
-import fr.acinq.eclair.blockchain.electrum.{
+import immortan.router.Router
+import immortan.channel.RemoteFulfill
+import immortan.blockchain.EclairWallet
+import immortan.electrum.{
   ElectrumWallet,
   ElectrumEclairWallet,
   ElectrumChainSync,
@@ -27,8 +27,7 @@ import fr.acinq.eclair.blockchain.electrum.{
   WalletParameters,
   CurrentBlockCount
 }
-import fr.acinq.eclair.wire.{NodeAddress, Domain}
-import fr.acinq.eclair.channel.{CMD_CHECK_FEERATE}
+import immortan.channel.{CMD_CHECK_FEERATE}
 import immortan.{
   LNParams,
   ChanFundingTxDescription,
@@ -41,7 +40,9 @@ import immortan.{
   SyncParams,
   TxDescription,
   WalletExt,
-  WalletSecret
+  WalletSecret,
+  ~,
+  none
 }
 import immortan.fsm.{
   OutgoingPaymentListener,
@@ -56,7 +57,6 @@ import immortan.utils.{
   WalletEventsCatcher,
   WalletEventsListener
 }
-import immortan.crypto.Tools.{~, none}
 
 import utils.RequestsConnectionProvider
 import scala.concurrent.duration.FiniteDuration
@@ -128,7 +128,7 @@ object Main extends IOApp.Simple {
       LNParams.chainHash,
       customAddress = Config.electrum.map { addr =>
         val hostOrIP ~ port = addr.splitAt(addr.lastIndexOf(':'))
-        NodeAddress.fromParts(hostOrIP, port.tail.toInt, Domain)
+        NodeAddress.fromParts(hostOrIP, port.tail.toInt).get
       }
     )
     val sync = new ElectrumChainSync(

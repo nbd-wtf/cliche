@@ -1,7 +1,7 @@
 import java.sql.{Connection, DriverManager}
-import fr.acinq.eclair.channel.PersistentChannelData
-import fr.acinq.bitcoin.ByteVector32
+import scoin.ByteVector32
 import immortan.WalletSecret
+import immortan.channel.PersistentChannelData
 import immortan.sqlite._
 
 object DB {
