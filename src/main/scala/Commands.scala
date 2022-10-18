@@ -381,7 +381,7 @@ object Commands {
             (
               // @formatter:off
               ("invoice" -> prExt.raw) ~~
-              ("msatoshi" -> prExt.pr.amount_opt.map(_.toLong)) ~~
+              ("msatoshi" -> prExt.pr.amountOpt.map(_.toLong)) ~~
               ("payment_hash" -> prExt.pr.paymentHash.toHex) ~~
               ("hints_count" -> prExt.pr.routingInfo.size)
               // @formatter:on
@@ -403,7 +403,7 @@ object Commands {
     (Try(PaymentRequestExt.fromUri(params.invoice)).toOption match {
       case None => topic.publish1(JSONRPCError(id, "invalid invoice"))
       case Some(prExt)
-          if prExt.pr.amount_opt.isEmpty && params.msatoshi.isEmpty =>
+          if prExt.pr.amountOpt.isEmpty && params.msatoshi.isEmpty =>
         topic.publish1(JSONRPCError(id, "missing amount"))
       case Some(prExt) if prExt.pr.paymentSecret == None =>
         topic.publish1(JSONRPCError(id, "missing payment secret"))
@@ -416,7 +416,7 @@ object Commands {
         val amount =
           params.msatoshi
             .map(MilliSatoshi(_))
-            .orElse(prExt.pr.amount_opt)
+            .orElse(prExt.pr.amountOpt)
             .getOrElse(MilliSatoshi(0L))
 
         val cmd = LNParams.cm
