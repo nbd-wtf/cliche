@@ -1,4 +1,4 @@
-import java.sql.{Connection, DriverManager}
+import java.nio.file.Paths
 import scoin.ByteVector32
 import immortan.WalletSecret
 import immortan.channel.PersistentChannelData
@@ -7,41 +7,46 @@ import immortan.sqlite._
 object DB {
   val dbname: String =
     WalletSecret(Config.seed).keys.ourNodePrivateKey.publicKey.toString.take(6)
-  val dbpath: String = s"${Config.datadir}/db-${dbname}.sqlite"
+  val dbpath: String =
+    Paths
+      .get(Config.datadir)
+      .resolve("db-${dbname}.sqlite")
+      .toAbsolutePath()
+      .toString()
   println(s"# setting up database at $dbpath")
-  val sqlitedb = DriverManager.getConnection(s"jdbc:sqlite:$dbpath")
+
+  val sqlitedb: DBInterface = DBPlatform(dbpath)
 
   // replace this with something that does migrations properly in the future
   DBInit.createTables(sqlitedb)
 
-  val dbinterface = DBInterfaceSQLiteGeneral(sqlitedb)
   var txDataBag: SQLiteTx = null
   var lnUrlPayBag: SQLiteLNUrlPay = null
   var chainWalletBag: SQLiteChainWallet = null
   var extDataBag: SQLiteData = null
 
-  dbinterface txWrap {
-    txDataBag = new SQLiteTx(dbinterface)
-    lnUrlPayBag = new SQLiteLNUrlPay(dbinterface)
-    chainWalletBag = new SQLiteChainWallet(dbinterface)
-    extDataBag = new SQLiteData(dbinterface)
+  sqlitedb.txWrap {
+    txDataBag = new SQLiteTx(sqlitedb)
+    lnUrlPayBag = new SQLiteLNUrlPay(sqlitedb)
+    chainWalletBag = new SQLiteChainWallet(sqlitedb)
+    extDataBag = new SQLiteData(sqlitedb)
   }
 
-  val logBag = new SQLiteLog(dbinterface)
+  val logBag = new SQLiteLog(sqlitedb)
 
   val normalBag = new SQLiteNetwork(
-    dbinterface,
+    sqlitedb,
     NormalChannelUpdateTable,
     NormalChannelAnnouncementTable,
     NormalExcludedChannelTable
   )
   val hostedBag = new SQLiteNetwork(
-    dbinterface,
+    sqlitedb,
     HostedChannelUpdateTable,
     HostedChannelAnnouncementTable,
     HostedExcludedChannelTable
   )
-  val payBag = new SQLitePayment(extDataBag.db, preimageDb = dbinterface) {
+  val payBag = new SQLitePayment(extDataBag.db, preimageDb = sqlitedb) {
     override def addSearchablePayment(
         search: String,
         paymentHash: ByteVector32
@@ -49,7 +54,7 @@ object DB {
   }
 
   val chanBag =
-    new SQLiteChannel(dbinterface, channelTxFeesDb = extDataBag.db) {
+    new SQLiteChannel(sqlitedb, channelTxFeesDb = extDataBag.db) {
       override def put(
           data: PersistentChannelData
       ): PersistentChannelData = {
