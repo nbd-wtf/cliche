@@ -96,7 +96,7 @@ object Main extends IOApp.Simple {
     println("# instantiating channel master")
     LNParams.cm = new ChannelMaster(DB.payBag, DB.chanBag, DB.extDataBag, pf)
 
-    println("# instantiating electrum actors")
+    println("# instantiating electrum wallet")
     val pool = new ElectrumClientPool(
       LNParams.blockCount,
       LNParams.chainHash,
@@ -377,7 +377,7 @@ object Main extends IOApp.Simple {
           )
         } yield ()
         else IO.unit,
-        new ServerApp().stream.compile.drain,
+        new ServerApp().server.allocated.flatMap(_._2),
         if (Config.nativeImageAgent) IO.unit else new StdinApp().run(),
         new StdoutApp().run()
       ).void

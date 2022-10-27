@@ -2,7 +2,7 @@ import scala.util.chaining._
 import scala.util.{Try, Random, Success, Failure}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
-import com.softwaremill.quicklens.ModifyPimp
+import com.softwaremill.quicklens._
 import scodec.bits.ByteVector
 import fs2.concurrent.Topic
 import io.circe._
@@ -339,7 +339,7 @@ object Commands {
               )
             )
           ).flatten
-          defaultTags ++ hops.map(Bolt11Invoice.RoutingInfo)
+          defaultTags ++ hops.map(Bolt11Invoice.RoutingInfo(_))
         },
         ByteVector.empty
       ).sign(privateKey)

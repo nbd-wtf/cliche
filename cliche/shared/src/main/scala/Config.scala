@@ -1,6 +1,5 @@
 import java.io.File
-import com.typesafe.config.{ConfigFactory, Config => TypesafeConfig}
-import net.ceedubs.ficus.Ficus._
+import org.ekrich.config.ConfigFactory
 import scoin.{Crypto, MnemonicCode}
 
 object Config {
@@ -11,14 +10,14 @@ object Config {
 
   (new File(datadir)).mkdirs()
 
-  val c: TypesafeConfig = ConfigFactory
+  val c = ConfigFactory
     .systemProperties()
     .withFallback(ConfigFactory.parseFile(new File(datadir, "cliche.conf")))
     .withFallback(ConfigFactory.load())
 
-  val nativeImageAgent = c.as[Boolean]("nativeImageAgent")
+  val nativeImageAgent = c.getBoolean("nativeImageAgent")
 
-  val network = c.as[String]("cliche.network")
+  val network = c.getString("cliche.network")
   val electrum = Option(
     System.getProperty(
       "cliche.electrum",
@@ -27,9 +26,9 @@ object Config {
   )
   val seed =
     try {
-      c.as[String]("cliche.seed").split(" ").toList
+      c.getString("cliche.seed").split(" ").toList
     } catch {
-      case _: com.typesafe.config.ConfigException$Missing => {
+      case _: org.ekrich.config.ConfigException => {
         println(
           "# you must specify your mnemonic seed as `cliche.seed = \"...\"` your `cliche.conf` file."
         )
@@ -57,10 +56,10 @@ object Config {
     }
   }
 
-  val compactJSON = c.as[Boolean]("cliche.json.compact")
+  val compactJSON = c.getBoolean("cliche.json.compact")
 
-  val websocketHost = c.as[String]("cliche.websocket.host")
-  val websocketPort = c.as[Int]("cliche.websocket.port")
+  val websocketHost = c.getString("cliche.websocket.host")
+  val websocketPort = c.getInt("cliche.websocket.port")
 
   def print(): Unit = {
     println(

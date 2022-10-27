@@ -3,9 +3,10 @@ import cats.effect.std.Queue
 import cats.syntax.all._
 import fs2.{Stream, Pipe}
 import fs2.concurrent.Topic
+import com.comcast.ip4s.{Ipv4Address, Port}
 import org.http4s._
-import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.dsl.Http4sDsl
+import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.server.websocket._
 import org.http4s.websocket.WebSocketFrame
@@ -13,9 +14,9 @@ import org.http4s.websocket.WebSocketFrame._
 
 import scala.concurrent.duration._
 
-class ServerApp()(
-    implicit F: Async[IO],
-    implicit val topic: Topic[IO, JSONRPCMessage]
+class ServerApp()(implicit
+    F: Async[IO],
+    val topic: Topic[IO, JSONRPCMessage]
 ) extends Http4sDsl[IO] {
   def routes(wsb: WebSocketBuilder[IO]): HttpRoutes[IO] =
     HttpRoutes.of[IO] {
@@ -36,9 +37,10 @@ class ServerApp()(
       }
     }
 
-  def stream: Stream[IO, ExitCode] =
-    BlazeServerBuilder[IO]
-      .bindHttp(Config.websocketPort, Config.websocketHost)
-      .withHttpWebSocketApp(routes(_).orNotFound)
-      .serve
+  val server = EmberServerBuilder
+    .default[IO]
+    .withHost(Ipv4Address.fromString(Config.websocketHost).get)
+    .withPort(Port.fromInt(Config.websocketPort).get)
+    .withHttpWebSocketApp(routes(_).orNotFound)
+    .build
 }
