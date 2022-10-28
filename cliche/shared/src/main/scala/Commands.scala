@@ -7,7 +7,6 @@ import scodec.bits.ByteVector
 import fs2.concurrent.Topic
 import io.circe._
 import io.circe.syntax._
-import io.circe.generic.auto._
 import cats.effect.IO
 import cats.effect.std.{Dispatcher, CountDownLatch}
 import scoin.{
@@ -41,6 +40,7 @@ import immortan.utils.{
   BitcoinUri,
   LNUrl
 }
+import immortan.utils.ImplicitJsonFormats._
 import immortan.LNParams.ec
 
 sealed trait JSONRPCMessage {

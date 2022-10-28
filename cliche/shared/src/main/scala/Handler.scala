@@ -144,19 +144,32 @@ object Handler {
           "request-hc",
           "get a hosted channel from an external provider."
         ) {
+          val parsed = Opts.argument[String]("node_uri").map { uri =>
+            val spl = uri.split("@")
+            val splSuffix = spl(1).split(":")
+            val id = spl(0)
+            val hostname = splSuffix(0)
+            val port = splSuffix(1).toInt
+            (id, hostname, port)
+          }
+
           (
-            Opts.option[String](
-              long = "pubkey",
-              short = "n",
-              metavar = "nodeid",
-              help = "public key (node id) of the hosted channel provider."
-            ),
-            Opts.option[String](
-              long = "host",
-              short = "h",
-              metavar = "ip",
-              help = "ip address of the hosted channel provider."
-            ),
+            Opts
+              .option[String](
+                long = "pubkey",
+                short = "n",
+                metavar = "nodeid",
+                help = "public key (node id) of the hosted channel provider."
+              )
+              .orElse(parsed.map(_._1)),
+            Opts
+              .option[String](
+                long = "host",
+                short = "h",
+                metavar = "ip",
+                help = "ip address of the hosted channel provider."
+              )
+              .orElse(parsed.map(_._2)),
             Opts
               .option[Int](
                 long = "port",
@@ -165,6 +178,7 @@ object Handler {
                 help =
                   "port where the provider is listening for lightning connections."
               )
+              .orElse(parsed.map(_._3))
               .withDefault(9735),
             Opts
               .option[String](
@@ -215,6 +229,7 @@ object Handler {
                 metavar = "millisatoshis",
                 help = "amount to be paid for this invoice."
               )
+              .orElse(Opts.argument[Long]("msatoshi"))
               .orNone,
             Opts
               .option[String](
@@ -232,12 +247,14 @@ object Handler {
           "pay a lightning invoice."
         ) {
           (
-            Opts.option[String](
-              long = "invoice",
-              short = "i",
-              metavar = "bolt11",
-              help = "bolt11 payment request to be paid."
-            ),
+            Opts
+              .option[String](
+                long = "invoice",
+                short = "i",
+                metavar = "bolt11",
+                help = "bolt11 payment request to be paid."
+              )
+              .orElse(Opts.argument[String]("invoice")),
             Opts
               .option[Long](
                 long = "msatoshi",
@@ -245,6 +262,7 @@ object Handler {
                 metavar = "millisatoshis",
                 help = "amount to pay, if not provided on the invoice."
               )
+              .orElse(Opts.argument[Long]("msatoshi"))
               .orNone
           )
             .mapN(PayInvoice.apply)
@@ -254,18 +272,22 @@ object Handler {
           "pay to an lnurl paycode or lightning address."
         ) {
           (
-            Opts.option[String](
-              long = "lnurl",
-              short = "l",
-              metavar = "text",
-              help = "lnurl paycode or lightning address."
-            ),
-            Opts.option[Long](
-              long = "msatoshi",
-              short = "m",
-              metavar = "millisatoshis",
-              help = "amount to pay."
-            ),
+            Opts
+              .option[String](
+                long = "lnurl",
+                short = "l",
+                metavar = "text",
+                help = "lnurl paycode or lightning address."
+              )
+              .orElse(Opts.argument[String]("lnurl")),
+            Opts
+              .option[Long](
+                long = "msatoshi",
+                short = "m",
+                metavar = "millisatoshis",
+                help = "amount to pay."
+              )
+              .orElse(Opts.argument[Long]("msatoshi")),
             Opts
               .option[String](
                 long = "comment",
@@ -303,6 +325,7 @@ object Handler {
               metavar = "hex",
               help = "payment hash of the desired payment."
             )
+            .orElse(Opts.argument[String]("hash"))
             .map(CheckPayment.apply)
         },
         Opts.subcommand(
@@ -316,6 +339,7 @@ object Handler {
               metavar = "number",
               help = "number of payments to display."
             )
+            .orElse(Opts.argument[Int]("count"))
             .orNone
             .map(ListPayments.apply)
         },
@@ -330,6 +354,7 @@ object Handler {
               metavar = "number",
               help = "number of payments to display."
             )
+            .orElse(Opts.argument[Int]("count"))
             .orNone
             .map(ListTransactions.apply)
         },
@@ -345,6 +370,7 @@ object Handler {
               help =
                 "channel id of the hosted channel that has the override proposal being accepted."
             )
+            .orElse(Opts.argument[String]("channel_id"))
             .map(RemoveHostedChannel.apply)
         },
         Opts.subcommand(
@@ -359,6 +385,7 @@ object Handler {
               help =
                 "channel id of the hosted channel that has the override proposal being accepted."
             )
+            .orElse(Opts.argument[String]("channel_id"))
             .map(AcceptOverride.apply)
         },
         Opts.subcommand(
@@ -366,20 +393,24 @@ object Handler {
           "increase (or decrease) the size of a hosted channel (requires the host to agree)."
         ) {
           (
-            Opts.option[String](
-              long = "channel-id",
-              short = "c",
-              metavar = "id",
-              help =
-                "channel id of the hosted channel that has the override proposal being accepted."
-            ),
-            Opts.option[Long](
-              long = "satoshi-delta",
-              short = "s",
-              metavar = "satoshis",
-              help =
-                "amount to add (or remove) from the total capacity of the channel."
-            )
+            Opts
+              .option[String](
+                long = "channel-id",
+                short = "c",
+                metavar = "id",
+                help =
+                  "channel id of the hosted channel that has the override proposal being accepted."
+              )
+              .orElse(Opts.argument[String]("channel_id")),
+            Opts
+              .option[Long](
+                long = "satoshi-delta",
+                short = "s",
+                metavar = "satoshis",
+                help =
+                  "amount to add (or remove) from the total capacity of the channel."
+              )
+              .orElse(Opts.argument[Long]("delta"))
           ).mapN(ResizeHostedChannel.apply)
         },
         Opts.subcommand(
@@ -388,18 +419,22 @@ object Handler {
         ) { Opts.unit.map(_ => GetAddress()) },
         Opts.subcommand("send-to-address", "sends to an onchain address.") {
           (
-            Opts.option[String](
-              long = "address",
-              short = "a",
-              metavar = "bitcoin_address",
-              help = "the bitcoin address to send a payment to."
-            ),
-            Opts.option[Long](
-              long = "satoshi",
-              short = "s",
-              metavar = "satoshis",
-              help = "the amount in satoshis to send."
-            )
+            Opts
+              .option[String](
+                long = "address",
+                short = "a",
+                metavar = "bitcoin_address",
+                help = "the bitcoin address to send a payment to."
+              )
+              .orElse(Opts.argument[String]("address")),
+            Opts
+              .option[Long](
+                long = "satoshi",
+                short = "s",
+                metavar = "satoshis",
+                help = "the amount in satoshis to send."
+              )
+              .orElse(Opts.argument[Long]("delta"))
           ).mapN(SendToAddress.apply)
         },
         Opts.subcommand("open-nc", "open a normal channel.") {
@@ -445,6 +480,7 @@ object Handler {
                   "channel id of the hosted channel that has the override proposal being accepted."
               )
             )
+            .orElse(Opts.argument[String]("channel_id"))
             .map(CloseNormalChannel.apply)
         }
       ).reduce(_.orElse(_))
