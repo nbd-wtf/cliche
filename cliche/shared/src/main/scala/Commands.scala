@@ -59,6 +59,8 @@ sealed trait JSONRPCMessage {
         Json.obj("jsonrpc" := "2.0", "id" := id, "result" := result)
       case JSONRPCNotification(method, params) =>
         Json.obj("jsonrpc" := "2.0", "method" := method, "params" := params)
+      case _ =>
+        Json.arr("should".asJson, "never".asJson, "happen".asJson).asJson
     }
 
     (forceCompact || Config.compactJSON) match {
@@ -71,6 +73,11 @@ case class JSONRPCResponse(id: String, response: Json) extends JSONRPCMessage
 case class JSONRPCError(id: String, error: String) extends JSONRPCMessage
 case class JSONRPCNotification(method: String, params: Json)
     extends JSONRPCMessage
+
+// special for CLI
+case class RawCLIString(str: String) extends JSONRPCMessage {
+  override def render(irrelevant: Boolean): String = str
+}
 
 object Commands {
   def ping(params: Ping)(implicit

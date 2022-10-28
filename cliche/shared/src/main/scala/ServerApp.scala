@@ -28,7 +28,11 @@ class ServerApp()(implicit
         }
 
         val out: Stream[IO, WebSocketFrame] =
-          topic.subscribe(25).map(_.render(forceCompact = true)).map(Text(_))
+          topic
+            .subscribe(25)
+            .filterNot(_.isInstanceOf[RawCLIString])
+            .map(_.render(forceCompact = true))
+            .map(Text(_))
 
         val in: Pipe[IO, WebSocketFrame, Unit] =
           _.foreach(process)
