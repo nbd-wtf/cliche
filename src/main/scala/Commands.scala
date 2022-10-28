@@ -519,7 +519,8 @@ object Commands {
                           comment = params.comment,
                           name = params.name,
                           authKeyHost =
-                            if (params.attachAuth) Some(lnurl.uri.getHost)
+                            if (params.attachAuth)
+                              Some(lnurl.url.hostOption.get.value)
                             else None
                         )
                         .subscribe(
