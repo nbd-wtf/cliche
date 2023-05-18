@@ -128,7 +128,7 @@ object Main extends IOApp.Simple {
       LNParams.chainHash,
       customAddress = Config.electrum.map { addr =>
         val hostOrIP ~ port = addr.splitAt(addr.lastIndexOf(':'))
-        NodeAddress.fromParts(hostOrIP, port.tail.toInt, Domain)
+        (NodeAddress.fromParts(hostOrIP, port.tail.toInt, Domain), None)
       }
     )
     val sync = new ElectrumChainSync(
